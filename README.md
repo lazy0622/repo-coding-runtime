@@ -1,6 +1,6 @@
 # Repo Coding Runtime
 
-Repo Coding Runtime 是一个面向代码仓库的本地 Coding Agent Runtime。它直接跑在终端里，先看当前工作区，再用一组受约束的工具去读文件、改文件、跑命令，并把会话状态保存在本地 `.pico/` 目录里。源码包、CLI 命令和环境变量暂时保留 `pico`，以兼容现有代码和运行工件。
+Repo Coding Runtime 是一个面向代码仓库的本地 Coding Agent Runtime。它直接跑在终端里，先看当前工作区，再用一组受约束的工具去读文件、改文件、跑命令，并把会话状态保存在本地 `.pico/` 目录里。公开 CLI 命令是 `repo`；源码包、环境变量和旧版 `pico` 命令继续保留，以兼容现有代码和运行工件。
 
 它更像一个能在仓库里持续工作的命令行 Coding Agent，不是纯聊天窗口。你可以拿它做代码排查、测试修复、仓库分析，或者让它在当前项目里执行一次性的工程任务。
 
@@ -21,7 +21,7 @@ Repo Coding Runtime 是一个面向代码仓库的本地 Coding Agent Runtime。
 - 版本化运行事件：保留旧 `event` 字段，同时提供 `event_type`、schema version、run/task/phase 标识
 - 可选 Git worktree 隔离；脏工作区不会被自动删除
 - 原子保存 session、task state 和 report
-- CLI 命令是 `pico`，模块入口是 `python -m pico`
+- CLI 命令是 `repo`（同时兼容旧命令 `pico`），模块入口是 `python -m pico`
 - 会话保存在 `.pico/sessions/`，运行工件保存在 `.pico/runs/<run_id>/`
 - 支持四类模型后端：
   - Ollama
@@ -33,15 +33,15 @@ Repo Coding Runtime 是一个面向代码仓库的本地 Coding Agent Runtime。
 
 CLI 帮助信息：
 
-![pico help](assets/screenshots/pico-help.png)
+![repo help](assets/screenshots/pico-help.png)
 
 启动界面：
 
-![pico start](assets/screenshots/pico-start.png)
+![repo start](assets/screenshots/pico-start.png)
 
 REPL 内置命令与会话路径：
 
-![pico repl](assets/screenshots/pico-repl.png)
+![repo repl](assets/screenshots/pico-repl.png)
 
 ## 安装
 
@@ -64,25 +64,25 @@ pip install -e .
 在当前仓库里启动交互模式。默认 provider 是 DeepSeek：
 
 ```bash
-uv run pico
+uv run repo
 ```
 
 指定另一个工作目录：
 
 ```bash
-uv run pico --cwd /path/to/repo
+uv run repo --cwd /path/to/repo
 ```
 
 直接跑一次性任务：
 
 ```bash
-uv run pico "inspect the test failures and propose a fix"
+uv run repo "inspect the test failures and propose a fix"
 ```
 
 需要把 Agent 的改动与当前 checkout 隔离时，可以显式启用 detached Git worktree：
 
 ```bash
-uv run pico --cwd /path/to/repo --workspace-mode worktree
+uv run repo --cwd /path/to/repo --workspace-mode worktree
 ```
 
 该模式不会自动删除包含未提交改动的 worktree。运行目录会显示在启动界面，并写入 `report.json`，由使用者确认改动后再显式处理。
@@ -137,13 +137,13 @@ PICO_DEEPSEEK_MODEL="deepseek-v4-pro"
 所以常规情况下 `.env` 里只填 `PICO_DEEPSEEK_API_KEY` 就能直接启动：
 
 ```bash
-uv run pico
+uv run repo
 ```
 
 如果你需要临时切模型或代理地址，不必改 `.env`，可以直接覆盖：
 
 ```bash
-uv run pico --model deepseek-v4-pro --base-url https://api.deepseek.com/anthropic
+uv run repo --model deepseek-v4-pro --base-url https://api.deepseek.com/anthropic
 ```
 
 DeepSeek 当前走 Anthropic-compatible Messages API，所以 runtime 里复用的是 Anthropic-compatible client；这只影响 HTTP 协议，不影响 CLI 用法。
@@ -164,8 +164,8 @@ PICO_RIGHT_CODES_API_KEY="your-right-codes-key"
 然后按需要选择 provider：
 
 ```bash
-uv run pico --provider openai
-uv run pico --provider anthropic
+uv run repo --provider openai
+uv run repo --provider anthropic
 ```
 
 如果你想显式区分两条 provider 的 key，也可以分别配置：
@@ -195,7 +195,7 @@ PICO_ANTHROPIC_API_KEY="your-right-codes-key-for-claude"
 如果要改用 OpenAI-compatible `/responses` 服务，显式传 `--provider openai`：
 
 ```bash
-uv run pico --provider openai
+uv run repo --provider openai
 ```
 
 默认 OpenAI 兼容接口使用 right.codes 的 Codex endpoint：
@@ -219,7 +219,7 @@ PICO_OPENAI_MODEL="gpt-5.4"
 如果要改用 Anthropic-compatible 服务，显式传 `--provider anthropic`：
 
 ```bash
-uv run pico --provider anthropic
+uv run repo --provider anthropic
 ```
 
 默认 Anthropic 兼容接口使用 right.codes 的 Claude endpoint：
@@ -230,7 +230,7 @@ PICO_RIGHT_CODES_API_KEY="your-right-codes-key"
 PICO_ANTHROPIC_MODEL="claude-sonnet-4-6"
 ```
 
-如果你的服务端对多个兼容接口复用了同一套密钥，`pico` 也支持从 `PICO_ANTHROPIC_API_KEY` 回退到 `ANTHROPIC_API_KEY`、`PICO_RIGHT_CODES_API_KEY`、`RIGHT_CODES_API_KEY`、`PICO_OPENAI_API_KEY` 或 `OPENAI_API_KEY`。
+如果你的服务端对多个兼容接口复用了同一套密钥，Repo Coding Runtime 也支持从 `PICO_ANTHROPIC_API_KEY` 回退到 `ANTHROPIC_API_KEY`、`PICO_RIGHT_CODES_API_KEY`、`RIGHT_CODES_API_KEY`、`PICO_OPENAI_API_KEY` 或 `OPENAI_API_KEY`。
 
 ### Ollama
 
@@ -239,7 +239,7 @@ PICO_ANTHROPIC_MODEL="claude-sonnet-4-6"
 ```bash
 ollama serve
 ollama pull qwen3.5:4b
-uv run pico --provider ollama --model qwen3.5:4b
+uv run repo --provider ollama --model qwen3.5:4b
 ```
 
 ## 常用交互命令
@@ -275,7 +275,7 @@ Read the failing test and implementation first. Make the smallest patch, then ru
 也可以重复传入显式路径；传空列表给 Python API 会关闭默认 Skills 扫描：
 
 ```bash
-uv run pico --skill-path /path/to/team-skills --skill-path /path/to/project-skills
+uv run repo --skill-path /path/to/team-skills --skill-path /path/to/project-skills
 ```
 
 ## MCP 工具
@@ -298,7 +298,7 @@ Repo Coding Runtime 默认读取仓库内存在的 `.pico/mcp.json`，也可以�
 启动：
 
 ```bash
-uv run pico --mcp-config .pico/mcp.json
+uv run repo --mcp-config .pico/mcp.json
 ```
 
 MCP Server 不可用时默认记录诊断并跳过该 Provider，不会绕过 Gateway；远端标记为非只读的工具默认按高风险工具处理。
@@ -315,8 +315,8 @@ V1.5 在 V1 Runtime 上增加可恢复的串行执行计划和验证闭环：
 示例：
 
 ```bash
-uv run pico --verify-command "python -m pytest -q" "修复当前测试失败"
-uv run pico --replay .pico/runs/<run_id>/trace.jsonl
+uv run repo --verify-command "python -m pytest -q" "修复当前测试失败"
+uv run repo --replay .pico/runs/<run_id>/trace.jsonl
 ```
 
 V1.5 仍保持单 Agent、单 ToolGateway 和显式审批边界，不会默认启用多 Agent 委派或自动长期记忆。
