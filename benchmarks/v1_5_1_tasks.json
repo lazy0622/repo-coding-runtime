@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "description": "Deterministic V1.5.1 tasks for Plan–Execute–Verify and replay evidence.",
+  "tasks": [
+    {
+      "id": "plan_verify_status",
+      "prompt": "Use a short plan, change README.md status from pending to verified, and finish only after the verifier passes.",
+      "fixture_repo": "tests/fixtures/bench_repo_v1_5_1",
+      "allowed_tools": ["read_file", "patch_file"],
+      "step_budget": 3,
+      "expected_artifact": "README.md contains status: verified",
+      "verifier": "python3 -c \"from pathlib import Path; assert 'status: verified' in Path('README.md').read_text(encoding='utf-8')\"",
+      "verify_command": "python3 -c \"from pathlib import Path; assert 'status: verified' in Path('README.md').read_text(encoding='utf-8')\"",
+      "category": "plan-verify"
+    },
+    {
+      "id": "verification_retry",
+      "prompt": "Change README.md status to passed. The first attempt may be incomplete; use verification evidence to repair it.",
+      "fixture_repo": "tests/fixtures/bench_repo_v1_5_1",
+      "allowed_tools": ["patch_file"],
+      "step_budget": 3,
+      "max_verification_attempts": 1,
+      "expected_artifact": "README.md contains status: passed",
+      "verifier": "python3 -c \"from pathlib import Path; assert 'status: passed' in Path('README.md').read_text(encoding='utf-8')\"",
+      "verify_command": "python3 -c \"from pathlib import Path; assert 'status: passed' in Path('README.md').read_text(encoding='utf-8')\"",
+      "category": "verification-retry"
+    },
+    {
+      "id": "plan_replay_evidence",
+      "prompt": "Create a one-step plan, inspect README.md, and finish with replayable plan and verification evidence.",
+      "fixture_repo": "tests/fixtures/bench_repo_v1_5_1",
+      "allowed_tools": ["read_file"],
+      "step_budget": 2,
+      "expected_artifact": "README.md remains available and the run records plan and verification events",
+      "verifier": "python3 -c \"import json; from pathlib import Path; runs = list(Path('.pico/runs').glob('*/trace.jsonl')); events = [json.loads(line) for line in runs[0].read_text(encoding='utf-8').splitlines()]; names = {event.get('event') for event in events}; assert 'plan_updated' in names and 'verification_finished' in names\"",
+      "verify_command": "python3 -c \"from pathlib import Path; assert Path('README.md').is_file()\"",
+      "category": "replay-evidence"
+    }
+  ]
+}
