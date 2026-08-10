@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "One-task live-provider smoke test for RepoRuntimeBench. This is not a solve-rate claim.",
+  "tasks": [
+    {
+      "id": "rrb_live_single_file_add",
+      "prompt": "Fix app/calculator.py so add returns the sum of its arguments. Inspect the implementation, make the smallest safe edit, and report the result.",
+      "fixture_repo": "tests/fixtures/reporuntimebench_python",
+      "allowed_tools": ["read_file", "get_file_outline", "find_symbol", "patch_file", "apply_patch"],
+      "step_budget": 8,
+      "expected_artifact": "add performs addition",
+      "artifact_path": "app/calculator.py",
+      "verifier": "python -c \"from app.calculator import add; assert add(2, 3) == 5; assert add(-2, 1) == -1\"",
+      "category": "live-single-file-bugfix",
+      "execution_policy": {"require_edit": true, "discovery_budget": 3, "first_edit_deadline": 6}
+    }
+  ]
+}

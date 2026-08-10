@@ -18,6 +18,7 @@ from . import security as securitylib
 from .context_manager import ContextManager
 from .coding_workflow import CodingWorkflowManager
 from .events import build_run_event
+from .execution_policy import EDIT_TOOLS, ExecutionPolicy
 from .checkpoint import CHECKPOINT_NONE_STATUS
 from .prompt_prefix import build_prompt_prefix, tool_signature
 from .plan import PlanState
@@ -87,6 +88,8 @@ class Pico:
         verify_command=None,
         verify_timeout=60,
         max_verification_attempts=2,
+        execution_policy=None,
+        task_mode="auto",
     ):
         self.model_client = model_client
         self.workspace = workspace
@@ -117,6 +120,15 @@ class Pico:
         self.verify_command = str(verify_command or "").strip()
         self.verify_timeout = max(1, int(verify_timeout))
         self.max_verification_attempts = max(0, int(max_verification_attempts))
+        policy_value = execution_policy
+        no_edit_capability = self.allowed_tools is not None and not (set(self.allowed_tools) & EDIT_TOOLS)
+        if self.read_only or no_edit_capability:
+            policy_value = dict(execution_policy or {})
+            policy_value["require_edit"] = False
+        self.execution_policy = ExecutionPolicy(policy_value)
+        self.task_mode = str(task_mode or "auto").lower()
+        if self.task_mode not in {"auto", "inspect", "edit", "verify"}:
+            raise ValueError(f"unknown task_mode: {self.task_mode}")
         self.run_store = run_store or RunStore(Path(workspace.repo_root) / ".pico" / "runs")
         self.repo_index = RepoIndex(self.root)
         self.patch_journal = PatchJournal(self.root)
@@ -741,6 +753,7 @@ class Pico:
             "durable_superseded": list(self.last_durable_superseded),
             "plan": self.plan_summary(),
             "verification": dict(self.last_verification),
+            "execution_policy": self.execution_policy.summary(task_state),
             "redacted_env": self.detected_secret_env_summary(),
             "skills": {
                 "loaded": list(self.skill_registry.names()),
@@ -915,6 +928,22 @@ class Pico:
         # 这里支持两种工具格式：
         # 1. <tool>...</tool> 里包 JSON，适合简短调用
         # 2. XML 风格属性/子标签，适合写文件这类多行内容
+        if "<blocked>" in raw:
+            body = Pico.extract(raw, "blocked")
+            try:
+                payload = json.loads(body)
+            except Exception:
+                return "retry", Pico.retry_notice("model returned malformed blocked JSON")
+            if not isinstance(payload, dict) or not str(payload.get("reason", "")).strip():
+                return "retry", Pico.retry_notice("blocked payload must contain a non-empty reason")
+            evidence = payload.get("evidence", [])
+            if not isinstance(evidence, list):
+                return "retry", Pico.retry_notice("blocked evidence must be a list")
+            payload["reason"] = str(payload["reason"]).strip()
+            payload["evidence"] = [str(item) for item in evidence]
+            payload["required_input"] = str(payload.get("required_input", "")).strip()
+            payload["category"] = str(payload.get("category", "unspecified")).strip() or "unspecified"
+            return "blocked", payload
         if "<plan>" in raw and ("<tool>" not in raw or raw.find("<plan>") < raw.find("<tool>")) and ("<final>" not in raw or raw.find("<plan>") < raw.find("<final>")):
             body = Pico.extract(raw, "plan")
             try:
@@ -963,7 +992,7 @@ class Pico:
         else:
             prefix += ": model returned malformed tool output"
         return (
-            f"{prefix}. Reply with a valid <tool> call, <plan>, or a non-empty <final> answer. "
+            f"{prefix}. Reply with a valid <tool> call, <plan>, <blocked>, or a non-empty <final> answer. "
             'For multi-line files, prefer <tool name="write_file" path="file.py"><content>...</content></tool>.'
         )
 

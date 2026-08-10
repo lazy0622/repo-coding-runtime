@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError, as_completed
 import json
 from pathlib import Path
+import subprocess
 from uuid import uuid4
 
 from .atomic_io import replace_with_retry
@@ -38,6 +39,9 @@ READ_ONLY_SUBAGENT_TOOLS = (
     "get_changed_files",
     "preview_diff",
 )
+WRITE_SUBAGENT_TOOLS = (*READ_ONLY_SUBAGENT_TOOLS, "apply_patch", "run_shell")
+DEFAULT_SUBAGENT_CONCURRENCY = 2
+MAX_SUBAGENT_CONCURRENCY = 4
 
 
 class SubAgentTimeoutError(TimeoutError):
@@ -131,7 +135,7 @@ class SubAgentManager:
             if temporary.exists():
                 temporary.unlink()
 
-    def _workspace_for_task(self, artifact_root, isolate_worktrees):
+    def _workspace_for_task(self, artifact_root, isolate_worktrees, require_isolation=False):
         if not isolate_worktrees:
             return Path(self.agent.root), None, "read_only_shared_workspace", ""
         try:
@@ -141,6 +145,10 @@ class SubAgentManager:
             )
             return lease.workspace_root, lease, "detached_git_worktree_read_only", ""
         except (WorkspaceIsolationError, OSError) as exc:
+            if require_isolation:
+                raise WorkspaceIsolationError(
+                    f"writable sub-agent requires an isolated Git worktree: {exc}"
+                ) from exc
             return (
                 Path(self.agent.root),
                 None,
@@ -148,7 +156,7 @@ class SubAgentManager:
                 f"worktree isolation unavailable: {exc}",
             )
 
-    def _child(self, workspace_root, task_dir, max_steps):
+    def _child(self, workspace_root, task_dir, max_steps, writable=False):
         # Import lazily to keep the runtime facade and sub-agent manager acyclic.
         from .runtime import Pico
 
@@ -158,7 +166,7 @@ class SubAgentManager:
             workspace=workspace,
             session_store=SessionStore(task_dir / "session"),
             run_store=RunStore(task_dir / "runs"),
-            approval_policy="never",
+            approval_policy="auto" if writable else "never",
             max_steps=max_steps,
             max_new_tokens=self.agent.max_new_tokens,
             depth=self.agent.depth + 1,
@@ -166,7 +174,7 @@ class SubAgentManager:
             enable_delegate=False,
             enable_subagents=False,
             auto_promote_memory=False,
-            read_only=True,
+            read_only=not writable,
             secret_env_names=self.agent.secret_env_names,
             shell_env_allowlist=self.agent.shell_env_allowlist,
             skill_paths=(Path(workspace_root) / ".pico" / "skills",),
@@ -174,7 +182,8 @@ class SubAgentManager:
             verify_command="",
             verify_timeout=self.agent.verify_timeout,
             max_verification_attempts=0,
-            allowed_tools=READ_ONLY_SUBAGENT_TOOLS,
+            allowed_tools=WRITE_SUBAGENT_TOOLS if writable else READ_ONLY_SUBAGENT_TOOLS,
+            task_mode="edit" if writable else "inspect",
         )
 
     @staticmethod
@@ -187,9 +196,15 @@ class SubAgentManager:
                     for task_id, result in completed.items()
                 ]
             )
+        capability = (
+            "You are a bounded write sub-agent in an isolated Git worktree. Apply only the requested patch, "
+            "run focused verification, and never commit or merge. "
+            if task.mode == "write"
+            else "You are a bounded read-only research sub-agent. Do not modify files or run risky tools. "
+        )
         return (
-            "You are a bounded read-only research sub-agent in Pico V2. "
-            "Do not modify files, run risky tools, or claim work you did not verify. "
+            capability
+            + "Do not claim work you did not verify. "
             "Use Repo Index before broad reads when possible. Return one <final> whose body is valid JSON. "
             "The JSON schema is: {\"summary\":\"...\",\"findings\":[\"...\"],"
             "\"evidence\":[{\"path\":\"relative/path.py\",\"line_start\":1,"
@@ -201,6 +216,74 @@ class SubAgentManager:
             f"Request: {task.prompt}"
             f"{dependency_text}"
         )
+
+    @staticmethod
+    def _capture_patch(workspace_root, patch_path):
+        result = subprocess.run(
+            ["git", "diff", "--binary", "--no-ext-diff"],
+            cwd=workspace_root,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise WorkspaceIsolationError(result.stderr.strip() or "could not capture worktree patch")
+        patch_path.write_text(result.stdout, encoding="utf-8")
+        return str(patch_path) if result.stdout.strip() else ""
+
+    def _run_one(self, task, artifact_root, isolate_worktrees, allow_write_subagents, max_steps, completed):
+        writable = task.mode == "write"
+        if writable and not allow_write_subagents:
+            raise TaskGraphError("write task requires allow_write_subagents=true")
+        task_dir = artifact_root / task.task_id
+        task_dir.mkdir(parents=True, exist_ok=True)
+        workspace_root, lease, isolation_mode, fallback_reason = self._workspace_for_task(
+            artifact_root / task.task_id,
+            isolate_worktrees or writable,
+            require_isolation=writable,
+        )
+        child = None
+        timed_out = False
+        try:
+            child = self._child(workspace_root, task_dir, max_steps, writable=writable)
+            answer = self._ask_with_timeout(child, self._task_prompt(task, completed), task.timeout_seconds)
+            child_status = getattr(getattr(child, "current_task_state", None), "status", "completed")
+            run_dir = str(getattr(child, "current_run_dir", "") or "")
+            if child_status != "completed":
+                raise RuntimeError(f"child stopped with status {child_status}: {answer}")
+            evidence = EvidenceBundle.from_answer(answer, task_id=task.task_id, workspace_root=workspace_root)
+            patch_path = ""
+            if writable:
+                patch_path = self._capture_patch(workspace_root, task_dir / "workspace.patch")
+            return {
+                "ok": True,
+                "evidence": evidence,
+                "run_dir": run_dir,
+                "workspace_dir": str(workspace_root) if writable else "",
+                "patch_path": patch_path,
+                "isolation_mode": "detached_git_worktree_writable" if writable else isolation_mode,
+                "fallback_reason": fallback_reason,
+            }
+        except Exception as exc:
+            timed_out = isinstance(exc, SubAgentTimeoutError)
+            return {
+                "ok": False,
+                "error": str(exc) or exc.__class__.__name__,
+                "run_dir": str(getattr(child, "current_run_dir", "") or ""),
+                "timeout": timed_out,
+                "isolation_mode": "detached_git_worktree_writable" if writable else locals().get("isolation_mode", ""),
+                "fallback_reason": locals().get("fallback_reason", ""),
+            }
+        finally:
+            if child is not None and not timed_out:
+                child.close()
+            if lease is not None and not writable:
+                try:
+                    if lease.status() == "clean":
+                        lease.remove()
+                except Exception:
+                    pass
 
     @staticmethod
     def _ask_with_timeout(child, prompt, timeout_seconds):
@@ -285,6 +368,15 @@ class SubAgentManager:
         isolate_worktrees = args.get("isolate_worktrees", False)
         if not isinstance(isolate_worktrees, bool):
             raise TaskGraphError("isolate_worktrees must be boolean")
+        allow_write_subagents = args.get("allow_write_subagents", False)
+        if not isinstance(allow_write_subagents, bool):
+            raise TaskGraphError("allow_write_subagents must be boolean")
+        try:
+            max_concurrency = int(args.get("max_concurrency", DEFAULT_SUBAGENT_CONCURRENCY))
+        except (TypeError, ValueError) as exc:
+            raise TaskGraphError("max_concurrency must be an integer") from exc
+        if max_concurrency < 1 or max_concurrency > MAX_SUBAGENT_CONCURRENCY:
+            raise TaskGraphError(f"max_concurrency must be in [1, {MAX_SUBAGENT_CONCURRENCY}]")
         state_path = artifact_root / "task_graph.json"
         metadata.update(
             {
@@ -293,6 +385,9 @@ class SubAgentManager:
                 "isolation_mode": metadata.get("isolation_mode", ""),
                 "isolation_fallback_reason": metadata.get("isolation_fallback_reason", ""),
                 "read_only_tools": list(READ_ONLY_SUBAGENT_TOOLS),
+                "write_tools": list(WRITE_SUBAGENT_TOOLS),
+                "allow_write_subagents": allow_write_subagents,
+                "max_concurrency": max_concurrency,
                 "resumed": resumed,
             }
         )
@@ -311,116 +406,118 @@ class SubAgentManager:
                     raise TaskGraphError("task graph has pending tasks but no schedulable task")
                 break
 
-            # V2.1 remains serial by design. Recovery, retry and evidence ordering
-            # are deterministic before a later bounded-concurrency scheduler.
-            for task in ready:
+            batch = ready[:max_concurrency]
+            completed_snapshot = dict(completed_results)
+            for task in batch:
                 graph.mark_running(task.task_id)
-                task_dir = artifact_root / task.task_id
-                task_dir.mkdir(parents=True, exist_ok=True)
-                workspace_root, lease, isolation_mode, fallback_reason = self._workspace_for_task(
-                    artifact_root / task.task_id,
-                    isolate_worktrees,
-                )
-                metadata["isolation_mode"] = isolation_mode
-                if fallback_reason and not metadata["isolation_fallback_reason"]:
-                    metadata["isolation_fallback_reason"] = fallback_reason
                 self._emit(
                     "subagent_started",
                     {
                         "graph_id": graph.graph_id,
                         "subagent_task_id": task.task_id,
                         "depends_on": list(task.depends_on),
-                        "isolation_mode": isolation_mode,
+                        "mode": task.mode,
+                        "isolation_mode": "pending",
                         "attempt": task.attempts,
                         "max_attempts": task.max_attempts,
                         "timeout_seconds": task.timeout_seconds,
                     },
                 )
-                child = None
-                timed_out = False
-                try:
-                    child = self._child(workspace_root, task_dir, max_steps)
-                    answer = self._ask_with_timeout(
-                        child,
-                        self._task_prompt(task, completed_results),
-                        task.timeout_seconds,
-                    )
-                    child_status = getattr(getattr(child, "current_task_state", None), "status", "completed")
-                    run_dir = str(getattr(child, "current_run_dir", "") or "")
-                    if child_status != "completed":
-                        raise RuntimeError(f"child stopped with status {child_status}: {answer}")
-                    evidence = EvidenceBundle.from_answer(
-                        answer,
-                        task_id=task.task_id,
-                        workspace_root=workspace_root,
-                    )
-                    graph.mark_completed(
-                        task.task_id,
-                        evidence.summary,
-                        run_dir=run_dir,
-                        evidence=evidence.to_dict(),
-                    )
-                    completed_results[task.task_id] = evidence
-                    self._write_evidence(task_dir / "evidence.json", evidence.to_dict())
-                    self._emit(
-                        "subagent_finished",
-                        {
-                            "graph_id": graph.graph_id,
-                            "subagent_task_id": task.task_id,
-                            "status": "completed",
-                            "run_dir": run_dir,
-                            "isolation_mode": isolation_mode,
-                            "attempt": task.attempts,
-                            "evidence": evidence.to_dict(),
-                        },
-                    )
-                except Exception as exc:
-                    timed_out = isinstance(exc, SubAgentTimeoutError)
-                    run_dir = str(getattr(child, "current_run_dir", "") or "")
-                    error = str(exc) or exc.__class__.__name__
-                    if task.can_retry():
-                        graph.mark_retry(
+
+            self._write_state(state_path, graph, metadata)
+            with ThreadPoolExecutor(max_workers=max_concurrency, thread_name_prefix="pico-task-graph") as executor:
+                futures = {
+                    executor.submit(
+                        self._run_one,
+                        task,
+                        artifact_root,
+                        isolate_worktrees,
+                        allow_write_subagents,
+                        max_steps,
+                        completed_snapshot,
+                    ): task
+                    for task in batch
+                }
+                for future in as_completed(futures):
+                    task = futures[future]
+                    task_dir = artifact_root / task.task_id
+                    try:
+                        outcome = future.result()
+                    except Exception as exc:
+                        outcome = {
+                            "ok": False,
+                            "error": str(exc) or exc.__class__.__name__,
+                            "run_dir": "",
+                            "timeout": False,
+                            "isolation_mode": "",
+                            "fallback_reason": "",
+                        }
+                    isolation_mode = outcome.get("isolation_mode", "")
+                    fallback_reason = outcome.get("fallback_reason", "")
+                    if isolation_mode:
+                        metadata["isolation_mode"] = isolation_mode
+                    if fallback_reason and not metadata["isolation_fallback_reason"]:
+                        metadata["isolation_fallback_reason"] = fallback_reason
+                    if outcome["ok"]:
+                        evidence = outcome["evidence"]
+                        graph.mark_completed(
                             task.task_id,
-                            error,
-                            reason="timeout" if timed_out else "child_failure",
+                            evidence.summary,
+                            run_dir=outcome["run_dir"],
+                            evidence=evidence.to_dict(),
                         )
+                        task.workspace_dir = outcome.get("workspace_dir", "")
+                        task.patch_path = outcome.get("patch_path", "")
+                        completed_results[task.task_id] = evidence
+                        self._write_evidence(task_dir / "evidence.json", evidence.to_dict())
                         self._emit(
-                            "subagent_retry",
+                            "subagent_finished",
                             {
                                 "graph_id": graph.graph_id,
                                 "subagent_task_id": task.task_id,
+                                "status": "completed",
+                                "mode": task.mode,
+                                "run_dir": outcome["run_dir"],
+                                "workspace_dir": task.workspace_dir,
+                                "patch_path": task.patch_path,
+                                "isolation_mode": isolation_mode,
                                 "attempt": task.attempts,
-                                "next_attempt": task.attempts + 1,
-                                "reason": "timeout" if timed_out else "child_failure",
-                                "error": clip(error, 500),
+                                "evidence": evidence.to_dict(),
                             },
                         )
                     else:
-                        graph.mark_failed(task.task_id, error, run_dir=run_dir)
-                    self._emit(
-                        "subagent_finished",
-                        {
-                            "graph_id": graph.graph_id,
-                            "subagent_task_id": task.task_id,
-                            "status": "retrying" if task.status != "failed" else "failed",
-                            "error": clip(error, 500),
-                            "run_dir": run_dir,
-                            "isolation_mode": isolation_mode,
-                            "attempt": task.attempts,
-                            "timeout": timed_out,
-                        },
-                    )
-                finally:
-                    if lease is not None:
-                        try:
-                            if lease.status() == "clean":
-                                lease.remove()
-                        except Exception as exc:
-                            if not metadata["isolation_fallback_reason"]:
-                                metadata["isolation_fallback_reason"] = f"worktree cleanup deferred: {exc}"
-                    if child is not None and not timed_out:
-                        child.close()
-                self._write_state(state_path, graph, metadata)
+                        timed_out = bool(outcome.get("timeout"))
+                        error = outcome["error"]
+                        if task.can_retry():
+                            graph.mark_retry(task.task_id, error, reason="timeout" if timed_out else "child_failure")
+                            self._emit(
+                                "subagent_retry",
+                                {
+                                    "graph_id": graph.graph_id,
+                                    "subagent_task_id": task.task_id,
+                                    "attempt": task.attempts,
+                                    "next_attempt": task.attempts + 1,
+                                    "reason": "timeout" if timed_out else "child_failure",
+                                    "error": clip(error, 500),
+                                },
+                            )
+                        else:
+                            graph.mark_failed(task.task_id, error, run_dir=outcome.get("run_dir", ""))
+                        self._emit(
+                            "subagent_finished",
+                            {
+                                "graph_id": graph.graph_id,
+                                "subagent_task_id": task.task_id,
+                                "status": "retrying" if task.status != "failed" else "failed",
+                                "mode": task.mode,
+                                "error": clip(error, 500),
+                                "run_dir": outcome.get("run_dir", ""),
+                                "isolation_mode": isolation_mode,
+                                "attempt": task.attempts,
+                                "timeout": timed_out,
+                            },
+                        )
+                    self._write_state(state_path, graph, metadata)
 
         bundles = [
             EvidenceBundle.from_dict(
@@ -453,6 +550,9 @@ class SubAgentManager:
                 "attempts": task.attempts,
                 "max_attempts": task.max_attempts,
                 "timeout_seconds": task.timeout_seconds,
+                "mode": task.mode,
+                "workspace_dir": task.workspace_dir,
+                "patch_path": task.patch_path,
                 "retry_history": list(task.retry_history),
                 "evidence": dict(task.evidence),
             }

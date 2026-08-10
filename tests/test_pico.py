@@ -53,6 +53,163 @@ def test_agent_runs_tool_then_final(tmp_path):
     assert "hello.txt" in agent.session["memory"]["files"]
 
 
+def test_execution_policy_rejects_premature_final_then_accepts_patch(tmp_path):
+    agent = build_agent(
+        tmp_path,
+        [
+            "<final>The change is complete.</final>",
+            '<tool name="patch_file" path="README.md"><old_text>demo</old_text><new_text>updated</new_text></tool>',
+            "<final>The change is complete.</final>",
+        ],
+        max_steps=4,
+        execution_policy={"require_edit": True, "first_edit_deadline": 3},
+    )
+
+    assert agent.ask("Update README.md") == "The change is complete."
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "updated\n"
+    state = agent.current_task_state
+    assert state.first_edit_step == 1
+    assert state.write_tool_steps == 1
+    assert state.work_stage == "finish"
+    trace = agent.run_store.trace_path(state).read_text(encoding="utf-8")
+    assert "premature_final_rejected" in trace
+
+
+def test_execution_policy_forces_transition_after_discovery_budget(tmp_path):
+    (tmp_path / "a.txt").write_text("alpha\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("beta\n", encoding="utf-8")
+    agent = build_agent(
+        tmp_path,
+        [
+            '<tool>{"name":"read_file","args":{"path":"a.txt","start":1,"end":1}}</tool>',
+            '<tool>{"name":"read_file","args":{"path":"b.txt","start":1,"end":1}}</tool>',
+            '<tool name="patch_file" path="README.md"><old_text>demo</old_text><new_text>diagnosed</new_text></tool>',
+            "<final>Done.</final>",
+        ],
+        max_steps=5,
+        execution_policy={"require_edit": True, "discovery_budget": 2, "first_edit_deadline": 4},
+    )
+
+    assert agent.ask("Fix README.md") == "Done."
+    assert "Supervisor: discovery budget exhausted" in agent.model_client.prompts[2]
+    state = agent.current_task_state
+    assert state.discovery_tool_steps == 2
+    assert state.first_edit_step == 3
+    assert "diagnosis_required" in state.policy_notices
+
+
+def test_execution_policy_blocks_discovery_after_first_edit_deadline(tmp_path):
+    (tmp_path / "a.txt").write_text("alpha\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("beta\n", encoding="utf-8")
+    agent = build_agent(
+        tmp_path,
+        [
+            '<tool>{"name":"read_file","args":{"path":"a.txt","start":1,"end":1}}</tool>',
+            '<tool>{"name":"read_file","args":{"path":"b.txt","start":1,"end":1}}</tool>',
+            '<tool>{"name":"read_file","args":{"path":"README.md","start":1,"end":1}}</tool>',
+            '<tool name="patch_file" path="README.md"><old_text>demo</old_text><new_text>bounded</new_text></tool>',
+            "<final>Done.</final>",
+        ],
+        max_steps=5,
+        execution_policy={"require_edit": True, "discovery_budget": 2, "first_edit_deadline": 2},
+    )
+
+    assert agent.ask("Fix README.md") == "Done."
+    tool_rows = [item for item in agent.session["history"] if item["role"] == "tool"]
+    assert tool_rows[2]["content"].startswith("error: execution policy blocked read_file")
+    assert agent.current_task_state.first_edit_step == 4
+    report = agent.run_store.load_report(agent.current_task_state.run_id)
+    assert report["execution_policy"]["first_edit_deadline"] == 2
+
+
+def test_explicit_inspect_mode_allows_read_only_final_for_edit_shaped_prompt(tmp_path):
+    agent = build_agent(
+        tmp_path,
+        ["<final>The requested file would need one change.</final>"],
+        task_mode="inspect",
+    )
+
+    assert agent.ask("Inspect how we would modify README.md") == "The requested file would need one change."
+    assert agent.current_task_state.task_mode == "inspect"
+    assert agent.current_task_state.edit_required is False
+
+
+def test_explicit_edit_mode_rejects_final_until_workspace_changes(tmp_path):
+    agent = build_agent(
+        tmp_path,
+        [
+            "<final>Done.</final>",
+            '<tool name="patch_file" path="README.md"><old_text>demo</old_text><new_text>explicit edit</new_text></tool>',
+            "<final>Done after edit.</final>",
+        ],
+        task_mode="edit",
+        max_steps=4,
+    )
+
+    assert agent.ask("Handle README.md") == "Done after edit."
+    assert agent.current_task_state.task_mode == "edit"
+    assert agent.current_task_state.write_tool_steps == 1
+
+
+def test_structured_blocked_result_is_terminal_and_persisted(tmp_path):
+    agent = build_agent(
+        tmp_path,
+        [
+            '<blocked>{"reason":"missing signing key","evidence":["SIGNING_KEY is unset"],'
+            '"required_input":"provide a test key","category":"missing_input"}</blocked>'
+        ],
+        task_mode="edit",
+    )
+
+    assert agent.ask("Sign the release") == "Blocked: missing signing key"
+    state = agent.current_task_state
+    assert state.status == "blocked"
+    assert state.phase == "blocked"
+    assert state.stop_reason == "blocked"
+    assert state.blocked["category"] == "missing_input"
+    report = agent.run_store.load_report(state.run_id)
+    assert report["task_state"]["blocked"]["required_input"] == "provide a test key"
+
+
+def test_malformed_blocked_result_is_retried(tmp_path):
+    agent = build_agent(
+        tmp_path,
+        [
+            "<blocked>not-json</blocked>",
+            '<blocked>{"reason":"dependency unavailable","evidence":[]}</blocked>',
+        ],
+        task_mode="inspect",
+        max_steps=3,
+    )
+
+    assert agent.ask("Inspect the external dependency") == "Blocked: dependency unavailable"
+    assert "malformed blocked JSON" in agent.model_client.prompts[1]
+
+
+def test_execution_policy_enforces_agent_verification_budget(tmp_path):
+    agent = build_agent(
+        tmp_path,
+        [
+            '<tool name="patch_file" path="README.md"><old_text>demo</old_text><new_text>verified</new_text></tool>',
+            '<tool>{"name":"run_shell","args":{"command":"python -c \'print(1)\'","timeout":20}}</tool>',
+            '<tool>{"name":"run_shell","args":{"command":"python -c \'print(2)\'","timeout":20}}</tool>',
+            "<final>Done.</final>",
+        ],
+        task_mode="edit",
+        execution_policy={"verification_budget": 1},
+        max_steps=5,
+    )
+
+    assert agent.ask("Update and verify README.md") == "Done."
+    shell_rows = [
+        item for item in agent.session["history"] if item.get("role") == "tool" and item.get("name") == "run_shell"
+    ]
+    assert "stdout:\n1" in shell_rows[0]["content"]
+    assert shell_rows[1]["content"].startswith("error: execution policy blocked run_shell")
+    report = agent.run_store.load_report(agent.current_task_state.run_id)
+    assert report["execution_policy"]["agent_verification_steps"] == 1
+
+
 def test_v1_experimental_delegate_is_disabled_by_default(tmp_path):
     agent = build_agent(tmp_path, ["<final>Done.</final>"])
 
@@ -664,6 +821,38 @@ def test_anthropic_compatible_client_extracts_first_text_block():
     assert result == "<final>ok</final>"
 
 
+def test_deepseek_anthropic_client_disables_provider_thinking_mode():
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps({"content": [{"type": "text", "text": "<final>ok</final>"}]}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return FakeResponse()
+
+    client = AnthropicCompatibleModelClient(
+        model="deepseek-v4-pro",
+        base_url="https://api.deepseek.com/anthropic",
+        api_key="sk-test",
+        temperature=0.2,
+        timeout=30,
+    )
+
+    with patch("urllib.request.urlopen", fake_urlopen):
+        assert client.complete("hello", 42) == "<final>ok</final>"
+
+    assert captured["thinking"] == {"type": "disabled"}
+
+
 def test_build_agent_uses_openai_provider_and_model_override(tmp_path):
     args = type(
         "Args",
@@ -747,6 +936,14 @@ def test_build_arg_parser_leaves_provider_unset_for_runtime_resolution(tmp_path)
     args = pico_pkg.build_arg_parser().parse_args(["--cwd", str(tmp_path)])
 
     assert args.provider is None
+
+
+def test_build_arg_parser_accepts_explicit_task_mode(tmp_path):
+    args = pico_pkg.build_arg_parser().parse_args(
+        ["--cwd", str(tmp_path), "--task-mode", "verify"]
+    )
+
+    assert args.task_mode == "verify"
 
 
 def test_build_arg_parser_accepts_anthropic_provider(tmp_path):

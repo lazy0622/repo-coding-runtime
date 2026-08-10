@@ -6,8 +6,20 @@ from pico.evaluation.metrics import (
     run_context_ablation_v2,
     run_memory_ablation_v2,
     run_recovery_ablation_v2,
+    run_security_quality_suite,
     write_benchmark_core_report,
 )
+
+
+def test_security_quality_suite_measures_false_blocks_and_leaks(tmp_path):
+    artifact_path = tmp_path / "artifacts" / "security-quality-v3.json"
+
+    artifact = run_security_quality_suite(repetitions=1, artifact_path=artifact_path)
+
+    assert artifact_path.is_file()
+    assert artifact["attack_block_rate"] == 1.0
+    assert artifact["false_block_rate"] == 0.0
+    assert artifact["secret_leak_rate"] == 0.0
 
 
 def test_run_context_ablation_v2_writes_expected_artifact(tmp_path):

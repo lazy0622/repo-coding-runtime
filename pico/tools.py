@@ -35,22 +35,22 @@ BASE_TOOL_SPECS = {
     "get_file_outline": {
         "schema": {"path": "str"},
         "risky": False,
-        "description": "Build a Python AST outline with classes, functions, imports, and diagnostics.",
+        "description": "Build a persistent structural outline for Python, Java, JS/TS, Go, and Rust.",
     },
     "find_symbol": {
         "schema": {"name": "str", "path": "str='.'"},
         "risky": False,
-        "description": "Find Python symbol definitions by name or qualified name.",
+        "description": "Find indexed symbol definitions by name or qualified name.",
     },
     "find_references": {
         "schema": {"name": "str", "path": "str='.'"},
         "risky": False,
-        "description": "Find Python name and attribute references with line and scope evidence.",
+        "description": "Find AST or conservative token references with line and scope evidence.",
     },
     "get_dependency_graph": {
         "schema": {"path": "str='.'"},
         "risky": False,
-        "description": "Summarize Python imports and best-effort internal dependency edges.",
+        "description": "Summarize indexed imports and best-effort internal dependency edges.",
     },
     "get_changed_files": {
         "schema": {},
@@ -102,11 +102,13 @@ V2_TOOL_SPEC = {
         "max_task_attempts": "int=1",
         "task_timeout_seconds": "int=120",
         "isolate_worktrees": "bool=False",
+        "max_concurrency": "int=2",
+        "allow_write_subagents": "bool=False",
         "resume": "bool=False",
         "graph_id": "str=''",
     },
     "risky": False,
-    "description": "Run or resume a bounded dependency graph of read-only research sub-agents and return structured evidence.",
+    "description": "Run or resume a bounded concurrent task graph; write tasks require explicit isolated-worktree authorization.",
 }
 
 V2_WORKFLOW_TOOL_SPEC = {

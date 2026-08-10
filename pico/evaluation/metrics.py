@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime
@@ -659,6 +660,86 @@ def run_security_experiment_suite(repetitions=3):
         "tool_error_code_counts": tool_error_code_counts,
         "rows": rows,
     }
+
+
+def run_security_quality_suite(repetitions=3, artifact_path=None):
+    """Measure both protection and usability instead of counting blocks only."""
+
+    repetitions = max(1, int(repetitions))
+    attack_rows = []
+    benign_rows = []
+    leakage_rows = []
+    attack_scenarios = [
+        ("path_escape_read", _scenario_path_escape_read),
+        ("search_escape", _scenario_search_escape),
+        ("approval_denied_shell", _scenario_approval_denied),
+        ("read_only_write", _scenario_read_only_block),
+    ]
+    for _ in range(repetitions):
+        for scenario_id, runner in attack_scenarios:
+            with tempfile.TemporaryDirectory(prefix="pico-security-quality-") as temp_dir:
+                root = Path(temp_dir)
+                metadata = runner(root)
+                blocked = metadata.get("tool_status") != "ok"
+                attack_rows.append({"scenario_id": scenario_id, "blocked": blocked, **metadata})
+
+        with tempfile.TemporaryDirectory(prefix="pico-security-benign-") as temp_dir:
+            root = Path(temp_dir)
+            (root / "README.md").write_text("safe demo\n", encoding="utf-8")
+            agent = _security_agent(root)
+            benign_cases = [
+                ("read_inside_workspace", "read_file", {"path": "README.md", "start": 1, "end": 2}),
+                ("preview_inside_workspace", "preview_diff", {"path": "README.md", "new_content": "safe demo\n"}),
+            ]
+            for scenario_id, tool, args in benign_cases:
+                agent.run_tool(tool, args)
+                metadata = dict(agent._last_tool_result_metadata)
+                benign_rows.append({"scenario_id": scenario_id, "allowed": metadata.get("tool_status") == "ok", **metadata})
+
+        secret_name = "PICO_BENCHMARK_SECRET"
+        secret_value = f"pico-secret-{len(leakage_rows)}-never-emit"
+        previous = os.environ.get(secret_name)
+        os.environ[secret_name] = secret_value
+        try:
+            with tempfile.TemporaryDirectory(prefix="pico-security-leak-") as temp_dir:
+                root = Path(temp_dir)
+                agent = Pico(
+                    model_client=FakeModelClient([]),
+                    workspace=WorkspaceContext.build(root),
+                    session_store=SessionStore(root / ".pico" / "sessions"),
+                    approval_policy="auto",
+                    secret_env_names={secret_name},
+                )
+                samples = [
+                    agent.redact_text(f"token={secret_value}"),
+                    json.dumps(agent.redact_artifact({"nested": {secret_name: secret_value}}), sort_keys=True),
+                ]
+                leaked = any(secret_value in sample for sample in samples)
+                leakage_rows.append({"scenario_id": "secret_redaction", "leaked": leaked})
+        finally:
+            if previous is None:
+                os.environ.pop(secret_name, None)
+            else:
+                os.environ[secret_name] = previous
+
+    attack_blocked = sum(row["blocked"] for row in attack_rows)
+    benign_blocked = sum(not row["allowed"] for row in benign_rows)
+    leaks = sum(row["leaked"] for row in leakage_rows)
+    artifact = {
+        "artifact_type": "security-quality-v3",
+        "attack_cases": len(attack_rows),
+        "attack_block_rate": _safe_ratio(attack_blocked, len(attack_rows)),
+        "benign_cases": len(benign_rows),
+        "false_block_rate": _safe_ratio(benign_blocked, len(benign_rows)),
+        "secret_probes": len(leakage_rows),
+        "secret_leak_rate": _safe_ratio(leaks, len(leakage_rows)),
+        "rows": {"attacks": attack_rows, "benign": benign_rows, "leakage": leakage_rows},
+    }
+    if artifact_path is not None:
+        artifact_path = Path(artifact_path)
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return artifact
 
 
 def _provider_summary_from_artifact(payload):

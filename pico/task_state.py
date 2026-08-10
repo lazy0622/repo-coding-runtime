@@ -12,6 +12,7 @@ STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"
 STATUS_STOPPED = "stopped"
 STATUS_FAILED = "failed"
+STATUS_BLOCKED = "blocked"
 
 PHASE_CREATED = "created"
 PHASE_PLANNING = "planning"
@@ -22,8 +23,9 @@ PHASE_PAUSED = "paused"
 PHASE_COMPLETED = "completed"
 PHASE_STOPPED = "stopped"
 PHASE_FAILED = "failed"
+PHASE_BLOCKED = "blocked"
 
-TERMINAL_PHASES = {PHASE_COMPLETED, PHASE_STOPPED, PHASE_FAILED}
+TERMINAL_PHASES = {PHASE_COMPLETED, PHASE_STOPPED, PHASE_FAILED, PHASE_BLOCKED}
 ALLOWED_PHASE_TRANSITIONS = {
     PHASE_CREATED: {PHASE_PLANNING, PHASE_EXECUTING, PHASE_PAUSED, *TERMINAL_PHASES},
     PHASE_PLANNING: {PHASE_EXECUTING, PHASE_VERIFYING, PHASE_WAITING_APPROVAL, PHASE_PAUSED, *TERMINAL_PHASES},
@@ -46,6 +48,7 @@ STOP_REASON_DELEGATE_FAILED = "delegate_failed"
 STOP_REASON_PERSISTENCE_ERROR = "persistence_error"
 STOP_REASON_RESUME_LOAD_ERROR = "resume_load_error"
 STOP_REASON_VERIFICATION_FAILED = "verification_failed"
+STOP_REASON_BLOCKED = "blocked"
 
 
 @dataclass
@@ -68,6 +71,21 @@ class TaskState:
     verification_error: str = ""
     phase: str = PHASE_CREATED
     phase_history: list = field(default_factory=list)
+    edit_required: bool = False
+    work_stage: str = ""
+    work_stage_history: list = field(default_factory=list)
+    discovery_tool_steps: int = 0
+    write_tool_steps: int = 0
+    verification_tool_steps: int = 0
+    first_edit_step: int = 0
+    read_only_streak: int = 0
+    repeated_tool_rejections: int = 0
+    policy_notices: list = field(default_factory=list)
+    task_mode: str = "auto"
+    stage_attempts: dict = field(default_factory=dict)
+    blocked: dict = field(default_factory=dict)
+    verification_repair_count: int = 0
+    final_verifier_passed: bool = False
 
     @classmethod
     def create(cls, task_id, user_request, run_id=""):
@@ -84,6 +102,7 @@ class TaskState:
             STATUS_COMPLETED: PHASE_COMPLETED,
             STATUS_STOPPED: PHASE_STOPPED,
             STATUS_FAILED: PHASE_FAILED,
+            STATUS_BLOCKED: PHASE_BLOCKED,
         }.get(status, PHASE_CREATED)
         return cls(
             run_id=str(data.get("run_id", "")),
@@ -104,6 +123,21 @@ class TaskState:
             verification_error=str(data.get("verification_error", "")),
             phase=str(data.get("phase", default_phase)),
             phase_history=list(data.get("phase_history", []) or []),
+            edit_required=bool(data.get("edit_required", False)),
+            work_stage=str(data.get("work_stage", "")),
+            work_stage_history=list(data.get("work_stage_history", []) or []),
+            discovery_tool_steps=int(data.get("discovery_tool_steps", 0)),
+            write_tool_steps=int(data.get("write_tool_steps", 0)),
+            verification_tool_steps=int(data.get("verification_tool_steps", 0)),
+            first_edit_step=int(data.get("first_edit_step", 0)),
+            read_only_streak=int(data.get("read_only_streak", 0)),
+            repeated_tool_rejections=int(data.get("repeated_tool_rejections", 0)),
+            policy_notices=list(data.get("policy_notices", []) or []),
+            task_mode=str(data.get("task_mode", "auto")),
+            stage_attempts=dict(data.get("stage_attempts", {}) or {}),
+            blocked=dict(data.get("blocked", {}) or {}),
+            verification_repair_count=int(data.get("verification_repair_count", 0)),
+            final_verifier_passed=bool(data.get("final_verifier_passed", False)),
         )
 
     @staticmethod
@@ -127,6 +161,17 @@ class TaskState:
             raise ValueError(f"invalid task phase transition: {self.phase} -> {phase}")
         self.phase = phase
         self._record_phase(phase, reason=reason)
+        return self
+
+    def transition_work_stage(self, stage, reason=""):
+        stage = str(stage or "")
+        if not stage or stage == self.work_stage:
+            return self
+        self.work_stage = stage
+        entry = {"stage": stage, "created_at": self._timestamp()}
+        if reason:
+            entry["reason"] = str(reason)
+        self.work_stage_history.append(entry)
         return self
 
     def record_attempt(self):
@@ -163,6 +208,16 @@ class TaskState:
     def stop_verification_failed(self, final_answer=""):
         return self.stop(STOP_REASON_VERIFICATION_FAILED, status=STATUS_FAILED, final_answer=final_answer)
 
+    def stop_blocked(self, payload):
+        payload = dict(payload or {})
+        self.status = STATUS_BLOCKED
+        self.stop_reason = STOP_REASON_BLOCKED
+        self.blocked = payload
+        self.final_answer = str(payload.get("reason", "Task blocked"))
+        if self.phase not in TERMINAL_PHASES:
+            self.transition(PHASE_BLOCKED, reason=STOP_REASON_BLOCKED)
+        return self
+
     def finish_success(self, final_answer):
         self.status = STATUS_COMPLETED
         self.stop_reason = STOP_REASON_FINAL_ANSWER_RETURNED
@@ -191,4 +246,19 @@ class TaskState:
             "verification_error": self.verification_error,
             "phase": self.phase,
             "phase_history": list(self.phase_history),
+            "edit_required": self.edit_required,
+            "work_stage": self.work_stage,
+            "work_stage_history": list(self.work_stage_history),
+            "discovery_tool_steps": self.discovery_tool_steps,
+            "write_tool_steps": self.write_tool_steps,
+            "verification_tool_steps": self.verification_tool_steps,
+            "first_edit_step": self.first_edit_step,
+            "read_only_streak": self.read_only_streak,
+            "repeated_tool_rejections": self.repeated_tool_rejections,
+            "policy_notices": list(self.policy_notices),
+            "task_mode": self.task_mode,
+            "stage_attempts": dict(self.stage_attempts),
+            "blocked": dict(self.blocked),
+            "verification_repair_count": self.verification_repair_count,
+            "final_verifier_passed": self.final_verifier_passed,
         }

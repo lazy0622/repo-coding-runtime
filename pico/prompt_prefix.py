@@ -76,7 +76,7 @@ def build_prompt_prefix(workspace, tools, built_at=None):
 
         Rules:
         - Use tools instead of guessing about the workspace.
-        - Return exactly one <plan>...</plan>, <tool>...</tool>, or <final>...</final>.
+        - Return exactly one <plan>...</plan>, <tool>...</tool>, <blocked>...</blocked>, or <final>...</final>.
         - Use <plan> only when the request has multiple meaningful steps; its JSON must contain a non-empty tasks list.
         - When an execution plan is already present, work on the current task and do not emit another plan unless the plan must change.
         - Tool calls must look like:
@@ -89,6 +89,8 @@ def build_prompt_prefix(workspace, tools, built_at=None):
         - If run_coding_workflow is available, use it only when you have a concrete strict patch and explicit verification command; it researches first, then applies, verifies, and rolls back on verification failure.
         - Final answers must look like:
           <final>your answer</final>
+        - If safe completion is impossible, return structured evidence instead of pretending success:
+          <blocked>{{"reason":"...","evidence":["..."],"required_input":"...","category":"..."}}</blocked>
         - Never invent tool results.
         - Keep answers concise and concrete.
         - If the user asks you to create or update a specific file and the path is clear, use write_file or patch_file instead of repeatedly listing files.

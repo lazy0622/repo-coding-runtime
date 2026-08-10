@@ -66,6 +66,14 @@ class AgentLoop:
         agent.record({"role": "user", "content": user_message, "created_at": now()})
 
         task_state = TaskState.create(run_id=agent.new_run_id(), task_id=agent.new_task_id(), user_request=user_message)
+        agent.execution_policy.start(task_state, user_message, task_mode=agent.task_mode)
+        agent.record(
+            {
+                "role": "supervisor",
+                "content": agent.execution_policy.directive(task_state),
+                "created_at": now(),
+            }
+        )
         task_state.resume_status = agent.resume_state.get("status", CHECKPOINT_NONE_STATUS)
         plan = agent.start_plan(user_message, preserve_existing=self._is_resume_request(agent, user_message))
         task_state.plan_id = plan.plan_id
@@ -96,6 +104,15 @@ class AgentLoop:
         while tool_steps < agent.max_steps and attempts < max_attempts:
             attempts += 1
             task_state.record_attempt()
+            agent.execution_policy.record_model_attempt(task_state)
+            supervisor_notice = agent.execution_policy.before_model(task_state)
+            if supervisor_notice:
+                agent.record({"role": "supervisor", "content": supervisor_notice, "created_at": now()})
+                agent.emit_trace(
+                    task_state,
+                    "execution_policy_notice",
+                    {"stage": task_state.work_stage, "notice": supervisor_notice},
+                )
             agent.run_store.write_task_state(task_state)
             prompt_started_at = time.monotonic()
             prompt, prompt_metadata = agent._build_prompt_and_metadata(user_message)
@@ -239,6 +256,7 @@ class AgentLoop:
                 self._sync_plan_progress(agent, task_state)
                 self._transition(agent, task_state, PHASE_EXECUTING, f"tool:{name}")
                 tool_result = agent.execute_tool(name, args)
+                agent.execution_policy.record_tool(task_state, name, tool_result.metadata)
                 result = tool_result.content
                 agent.record(
                     {
@@ -273,11 +291,60 @@ class AgentLoop:
                 agent.run_store.write_task_state(task_state)
                 continue
 
+            if kind == "blocked":
+                agent.record(
+                    {
+                        "role": "assistant",
+                        "content": "<blocked>" + json.dumps(payload, ensure_ascii=False) + "</blocked>",
+                        "created_at": now(),
+                    }
+                )
+                agent.block_plan(payload["reason"])
+                self._sync_plan_progress(agent, task_state)
+                previous_phase = task_state.phase
+                task_state.stop_blocked(payload)
+                self._emit_terminal_transition(agent, task_state, previous_phase, "blocked")
+                checkpoint = agent.create_checkpoint(task_state, user_message, trigger="blocked")
+                agent.run_store.write_task_state(task_state)
+                agent.emit_trace(
+                    task_state,
+                    "checkpoint_created",
+                    {"checkpoint_id": checkpoint["checkpoint_id"], "trigger": "blocked"},
+                )
+                agent.emit_trace(
+                    task_state,
+                    "run_finished",
+                    {
+                        "status": task_state.status,
+                        "stop_reason": task_state.stop_reason,
+                        "blocked": payload,
+                        "run_duration_ms": int((time.monotonic() - run_started_at) * 1000),
+                    },
+                )
+                agent.run_store.write_report(task_state, agent.redact_artifact(agent.build_report(task_state)))
+                return f"Blocked: {payload['reason']}"
+
             final = (payload or raw).strip()
+            final_allowed, final_reason = agent.execution_policy.final_allowed(task_state)
+            if not final_allowed:
+                notice = agent.retry_notice(
+                    "this request requires a repository edit, but no workspace-changing tool has succeeded; "
+                    "apply a minimal patch or return a concrete blocker"
+                )
+                agent.record({"role": "assistant", "content": final, "created_at": now()})
+                agent.record({"role": "supervisor", "content": notice, "created_at": now()})
+                agent.emit_trace(
+                    task_state,
+                    "premature_final_rejected",
+                    {"reason": final_reason, "stage": task_state.work_stage},
+                )
+                agent.run_store.write_task_state(task_state)
+                continue
             agent.record({"role": "assistant", "content": final, "created_at": now()})
 
             if agent.verify_command:
                 previous_phase = task_state.phase
+                agent.execution_policy.start_verification(task_state)
                 self._transition(agent, task_state, PHASE_VERIFYING, "verification_started")
                 agent.emit_trace(
                     task_state,
@@ -285,6 +352,7 @@ class AgentLoop:
                     {"command": agent.verify_command, "attempt": task_state.verification_attempts + 1},
                 )
                 verification_result = agent.run_verification(task_state)
+                agent.execution_policy.record_runtime_verification(task_state, verification_result.passed)
                 verification_payload = agent.redact_artifact(verification_result.to_dict())
                 agent.emit_trace(task_state, "verification_finished", verification_payload)
                 if not verification_result.passed:
@@ -292,7 +360,11 @@ class AgentLoop:
                         verification_result.stderr or verification_result.stdout or verification_result.reason or verification_result.error_code,
                         1200,
                     )
-                    if verification_result.status != VERIFY_BLOCKED and task_state.verification_attempts <= agent.max_verification_attempts:
+                    if (
+                        verification_result.status != VERIFY_BLOCKED
+                        and task_state.verification_attempts <= agent.max_verification_attempts
+                        and agent.execution_policy.can_repair_verification(task_state)
+                    ):
                         plan = agent.current_plan()
                         if plan is not None:
                             plan.record_verification_failure(detail)

@@ -279,6 +279,7 @@ def build_agent(args):
             verify_command=getattr(args, "verify_command", None),
             verify_timeout=getattr(args, "verify_timeout", 60),
             max_verification_attempts=getattr(args, "max_verification_attempts", 2),
+            task_mode=getattr(args, "task_mode", "auto"),
             secret_env_names=configured_secret_names,
             skill_paths=skill_paths,
             tool_providers=tool_providers,
@@ -298,6 +299,7 @@ def build_agent(args):
         verify_command=getattr(args, "verify_command", None),
         verify_timeout=getattr(args, "verify_timeout", 60),
         max_verification_attempts=getattr(args, "max_verification_attempts", 2),
+        task_mode=getattr(args, "task_mode", "auto"),
         secret_env_names=configured_secret_names,
         skill_paths=skill_paths,
         tool_providers=tool_providers,
@@ -371,6 +373,12 @@ def build_arg_parser():
     )
     parser.add_argument("--max-steps", type=int, default=6, help="Maximum tool/model iterations per request.")
     parser.add_argument("--max-new-tokens", type=int, default=512, help="Maximum model output tokens per step.")
+    parser.add_argument(
+        "--task-mode",
+        choices=("auto", "inspect", "edit", "verify"),
+        default="auto",
+        help="Declare whether this run inspects, edits, verifies, or infers intent automatically.",
+    )
     parser.add_argument("--no-plan", dest="plan_mode", action="store_false", help="Disable the V1.5 execution plan context.")
     parser.set_defaults(plan_mode=True)
     parser.add_argument("--verify-command", default=None, help="Run this workspace verification command before accepting a final answer.")
