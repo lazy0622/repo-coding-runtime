@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 
+import pico.evaluation.swebench as swebench_module
 from pico.evaluation.swebench import (
     SWEbenchAdapter,
     load_instances,
@@ -105,3 +106,34 @@ def test_swebench_adapter_records_timeout_and_continues(tmp_path):
     assert all(row["exit_code"] == 124 for row in summary["runs"])
     assert all(row["stop_reason"] == "adapter_timeout" for row in summary["runs"])
     assert all("timed out" in row["stderr"] for row in summary["runs"])
+
+
+def test_remote_cache_fetches_only_the_pinned_commit(monkeypatch, tmp_path):
+    commands = []
+
+    def fake_run(command, cwd, timeout=300, env=None):
+        del cwd, timeout, env
+        argv = [str(item) for item in command]
+        commands.append(argv)
+        if argv[:3] == ["git", "init", "--bare"]:
+            (tmp_path / "cache" / "owner__repo.git").mkdir(parents=True)
+        if argv[:3] == ["git", "cat-file", "-e"]:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="missing")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(swebench_module, "_run", fake_run)
+    adapter = SWEbenchAdapter(tmp_path / "output", cache_dir=tmp_path / "cache")
+
+    source = adapter._source(
+        {
+            "repo": "owner/repo",
+            "base_commit": "abc123",
+        }
+    )
+
+    assert source.endswith("owner__repo.git")
+    assert not any("clone" in command for command in commands)
+    fetch = next(command for command in commands if "fetch" in command)
+    assert "--depth=1" in fetch
+    assert "--filter=blob:none" in fetch
+    assert fetch[-1] == "abc123"

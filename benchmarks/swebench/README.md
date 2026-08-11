@@ -39,3 +39,15 @@ Report both successes and failures. The experiment summary records agent
 completion rate, non-empty patch rate, average tool steps and average first-edit
 step. Only the official harness report may be used for test-pass/solve-rate
 claims.
+
+For reproducible Linux patch generation, build the small Git + Python image once:
+
+```powershell
+docker build -t repo-runtime-swebench-generator `
+  -f benchmarks/swebench/Dockerfile.generator .
+```
+
+Mount the source read-only, mount `artifacts/` read-write, and pass provider
+secrets with `--env-file .env`. The adapter initializes one bare cache per
+repository and shallow-fetches each pinned `base_commit`; it does not mirror all
+remote refs.
