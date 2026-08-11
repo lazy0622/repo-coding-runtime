@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Six fixed local-repository development tasks for a configured live provider. This is a development set, not a public leaderboard.",
+  "defaults": {
+    "fixture_repo": "tests/fixtures/reporuntimebench_python",
+    "allowed_tools": ["read_file", "get_file_outline", "find_references", "patch_file", "run_shell"],
+    "step_budget": 12,
+    "task_mode": "edit"
+  },
+  "tasks": [
+    {"id":"live_add","prompt":"Fix app/calculator.py so add returns the sum. Inspect before editing and verify the behavior.","expected_artifact":"add fixed","artifact_path":"app/calculator.py","verifier":"python -c \"from app.calculator import add; assert add(2,3)==5; assert add(-1,1)==0\"","category":"single-file-bugfix"},
+    {"id":"live_clamp","prompt":"Fix clamp in app/calculator.py so values are constrained to inclusive low/high bounds. Verify edge cases.","expected_artifact":"clamp fixed","artifact_path":"app/calculator.py","verifier":"python -c \"from app.calculator import clamp; assert clamp(-1,0,10)==0; assert clamp(11,0,10)==10; assert clamp(5,0,10)==5\"","category":"edge-case-repair"},
+    {"id":"live_timeout","prompt":"Fix app/client.py so connect_timeout follows the shared DEFAULT_TIMEOUT configuration.","expected_artifact":"shared config","artifact_path":"app/client.py","verifier":"python -c \"from app.client import connect_timeout; assert connect_timeout()==30\"","category":"cross-file-bugfix"},
+    {"id":"live_text_contract","prompt":"Fix normalize_name and slugify in app/text.py according to their docstrings. Verify multiple inputs.","expected_artifact":"text contract","artifact_path":"app/text.py","verifier":"python -c \"from app.text import normalize_name,slugify; assert normalize_name(' A ')=='a'; assert slugify('Hello World')=='hello-world'\"","hidden_files":[{"source":"benchmarks/reporuntimebench/hidden/test_text_contract.py","destination":"hidden_tests/test_text_contract.py"}],"hidden_verifier":"python -m hidden_tests.test_text_contract","category":"hidden-contract"},
+    {"id":"live_parser","prompt":"Fix parse_port and split_pair in app/parser.py according to their docstrings.","expected_artifact":"parser contract","artifact_path":"app/parser.py","verifier":"python -c \"from app.parser import parse_port,split_pair; assert parse_port('80')==80; assert split_pair('a=b')==('a','b')\"","category":"multi-function-repair"},
+    {"id":"live_service","prompt":"Fix retry_count and users_endpoint in app/service.py to use the imported shared configuration values.","expected_artifact":"service config","artifact_path":"app/service.py","verifier":"python -c \"from app.service import retry_count,users_endpoint; assert retry_count()==3; assert users_endpoint()=='/v1/users'\"","category":"cross-file-bugfix"}
+  ]
+}

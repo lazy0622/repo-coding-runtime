@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 
-TASK_GRAPH_SCHEMA_VERSION = "task-graph-v2"
+TASK_GRAPH_SCHEMA_VERSION = "task-graph-v3"
+TASK_MODE_RESEARCH = "research"
+TASK_MODE_WRITE = "write"
+TASK_MODES = {TASK_MODE_RESEARCH, TASK_MODE_WRITE}
 TASK_PENDING = "pending"
 TASK_RUNNING = "running"
 TASK_COMPLETED = "completed"
@@ -40,6 +43,7 @@ class GraphTask:
     prompt: str
     depends_on: list[str] = field(default_factory=list)
     role: str = "researcher"
+    mode: str = TASK_MODE_RESEARCH
     status: str = TASK_PENDING
     attempts: int = 0
     result: str = ""
@@ -47,6 +51,8 @@ class GraphTask:
     started_at: str = ""
     finished_at: str = ""
     run_dir: str = ""
+    workspace_dir: str = ""
+    patch_path: str = ""
     max_attempts: int = DEFAULT_TASK_MAX_ATTEMPTS
     timeout_seconds: int = DEFAULT_TASK_TIMEOUT_SECONDS
     evidence: dict = field(default_factory=dict)
@@ -80,6 +86,7 @@ class GraphTask:
             prompt=prompt,
             depends_on=[_text(item) for item in raw_dependencies if _text(item)],
             role=_text(value.get("role"), "researcher"),
+            mode=_text(value.get("mode"), TASK_MODE_RESEARCH).lower(),
             max_attempts=max_attempts,
             timeout_seconds=timeout_seconds,
             evidence=dict(value.get("evidence", {}) or {}) if isinstance(value.get("evidence", {}), dict) else {},
@@ -102,6 +109,8 @@ class GraphTask:
         task.started_at = _text(value.get("started_at"), "")
         task.finished_at = _text(value.get("finished_at"), "")
         task.run_dir = _text(value.get("run_dir"), "")
+        task.workspace_dir = _text(value.get("workspace_dir"), "")
+        task.patch_path = _text(value.get("patch_path"), "")
         task.evidence = dict(value.get("evidence", {}) or {}) if isinstance(value.get("evidence", {}), dict) else {}
         task.retry_history = list(value.get("retry_history", []) or [])
         return task
@@ -113,6 +122,7 @@ class GraphTask:
             "prompt": self.prompt,
             "depends_on": list(self.depends_on),
             "role": self.role,
+            "mode": self.mode,
             "status": self.status,
             "attempts": self.attempts,
             "result": self.result,
@@ -120,6 +130,8 @@ class GraphTask:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "run_dir": self.run_dir,
+            "workspace_dir": self.workspace_dir,
+            "patch_path": self.patch_path,
             "max_attempts": self.max_attempts,
             "timeout_seconds": self.timeout_seconds,
             "evidence": dict(self.evidence),
@@ -197,6 +209,8 @@ class TaskGraph:
             raise TaskGraphError("task ids must be unique")
         task_ids = set(ids)
         for task in self.tasks:
+            if task.mode not in TASK_MODES:
+                raise TaskGraphError(f"invalid task mode for {task.task_id}: {task.mode}")
             if task.status not in {TASK_PENDING, TASK_RUNNING, *TERMINAL_TASK_STATUSES}:
                 raise TaskGraphError(f"invalid task status for {task.task_id}: {task.status}")
             if task.max_attempts < 1 or task.max_attempts > MAX_TASK_ATTEMPTS:

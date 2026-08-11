@@ -159,6 +159,9 @@ def _now_in_timezone(timezone_name):
 
 
 def _artifact_path_for_task(task):
+    explicit_path = str(task.get("artifact_path", "")).strip()
+    if explicit_path:
+        return explicit_path
     fixture_repo_name = Path(str(task["fixture_repo"])).name
     if fixture_repo_name not in TASK_FIXTURE_ARTIFACTS:
         raise ValueError(f"unsupported fixture repo for artifact lookup: {fixture_repo_name}")
@@ -170,6 +173,8 @@ def _workspace_relative(path, workspace_root):
 
 
 def _scripted_outputs_for_task(task):
+    if task.get("scripted_outputs"):
+        return [str(output) for output in task["scripted_outputs"]]
     outputs = SCRIPTED_MODEL_OUTPUTS.get(task["id"])
     if outputs is None:
         raise ValueError(f"no scripted model outputs for benchmark task: {task['id']}")
@@ -205,11 +210,15 @@ def validate_benchmark(data, repo_root=None):
         raise ValueError("benchmark tasks must be a non-empty list")
 
     repo_root = Path(repo_root or Path.cwd()).resolve()
+    defaults = data.get("defaults", {})
+    if not isinstance(defaults, dict):
+        raise ValueError("benchmark defaults must be a mapping")
     seen_ids = set()
     normalized_tasks = []
     for index, task in enumerate(tasks):
         if not isinstance(task, dict):
             raise ValueError(f"benchmark task at index {index} must be a mapping")
+        task = {**defaults, **task}
 
         missing_task_keys = [key for key in REQUIRED_TASK_KEYS if key not in task]
         if missing_task_keys:
@@ -256,6 +265,19 @@ def validate_benchmark(data, repo_root=None):
         normalized_task["expected_artifact"] = str(task["expected_artifact"]).strip()
         normalized_task["verifier"] = str(task["verifier"]).strip()
         normalized_task["category"] = str(task["category"]).strip()
+        task_mode = str(task.get("task_mode", "auto")).strip().lower()
+        if task_mode not in {"auto", "inspect", "edit", "verify"}:
+            raise ValueError(f"benchmark task {task_id} has an invalid task_mode: {task_mode}")
+        normalized_task["task_mode"] = task_mode
+        hidden_files = task.get("hidden_files", [])
+        if not isinstance(hidden_files, list):
+            raise ValueError(f"benchmark task {task_id} hidden_files must be a list")
+        for hidden_file in hidden_files:
+            if not isinstance(hidden_file, dict) or not hidden_file.get("source") or not hidden_file.get("destination"):
+                raise ValueError(
+                    f"benchmark task {task_id} hidden_files entries require source and destination"
+                )
+        normalized_task["hidden_files"] = hidden_files
         normalized_tasks.append(normalized_task)
 
     normalized = dict(data)
@@ -299,13 +321,40 @@ def summarize_rows(rows):
     }
 
 
+def summarize_execution_policy(rows):
+    rows = list(rows)
+    policy_rows = [dict(row.get("execution_policy", {}) or {}) for row in rows]
+    edit_rows = [policy for policy in policy_rows if policy.get("edit_required")]
+    patched_rows = [policy for policy in edit_rows if int(policy.get("write_tool_steps", 0)) > 0]
+    first_edit_steps = [int(policy.get("first_edit_step", 0)) for policy in patched_rows if policy.get("first_edit_step")]
+    total_tool_steps = sum(int(row.get("tool_steps", 0)) for row in rows)
+    discovery_tool_steps = sum(int(policy.get("discovery_tool_steps", 0)) for policy in policy_rows)
+    supervisor_interventions = sum(1 for policy in policy_rows if policy.get("policy_notices"))
+    repeated_tool_rejections = sum(int(policy.get("repeated_tool_rejections", 0)) for policy in policy_rows)
+    return {
+        "edit_required_tasks": len(edit_rows),
+        "patch_generation_rate": (len(patched_rows) / len(edit_rows)) if edit_rows else 0.0,
+        "average_first_edit_step": (sum(first_edit_steps) / len(first_edit_steps)) if first_edit_steps else 0.0,
+        "read_only_tool_ratio": (discovery_tool_steps / total_tool_steps) if total_tool_steps else 0.0,
+        "supervisor_intervention_rate": (supervisor_interventions / len(rows)) if rows else 0.0,
+        "repeated_tool_rejections": repeated_tool_rejections,
+    }
+
+
 def render_benchmark_markdown(artifact):
     """Render a compact, reviewable summary for a benchmark artifact."""
 
     artifact = dict(artifact or {})
     summary = dict(artifact.get("summary", {}) or {})
+    execution_metrics = dict(artifact.get("execution_metrics", {}) or {})
+    model_name = str(artifact.get("reproducibility", {}).get("model_name", ""))
+    scope_note = (
+        "This report describes deterministic harness behavior; it is not a claim about live model quality."
+        if model_name == DEFAULT_MODEL_NAME
+        else "This is a live-provider smoke result; one or a few tasks must not be presented as a benchmark solve rate."
+    )
     lines = [
-        "# Pico Benchmark Report",
+        "# Repo Coding Runtime Benchmark Report",
         "",
         f"- Captured at: `{artifact.get('captured_at', '')}`",
         f"- Source: `{artifact.get('benchmark', {}).get('source', '')}`",
@@ -315,6 +364,10 @@ def render_benchmark_markdown(artifact):
         f"- Passed: {summary.get('passed', 0)}",
         f"- Failed: {summary.get('failed', 0)}",
         f"- Pass rate: {float(summary.get('pass_rate', 0.0)):.1%}",
+        f"- Patch generation rate: {float(execution_metrics.get('patch_generation_rate', 0.0)):.1%}",
+        f"- Average first edit step: {float(execution_metrics.get('average_first_edit_step', 0.0)):.2f}",
+        f"- Read-only tool ratio: {float(execution_metrics.get('read_only_tool_ratio', 0.0)):.1%}",
+        f"- Supervisor intervention rate: {float(execution_metrics.get('supervisor_intervention_rate', 0.0)):.1%}",
         "",
         "## Task Results",
         "",
@@ -346,7 +399,7 @@ def render_benchmark_markdown(artifact):
             f"- Top-p: `{artifact.get('reproducibility', {}).get('decoding', {}).get('top_p', '')}`",
             f"- Max new tokens: `{artifact.get('reproducibility', {}).get('decoding', {}).get('max_new_tokens', '')}`",
             "",
-            "> This report describes deterministic harness behavior; it is not a claim about live model quality.",
+            f"> {scope_note}",
         ]
     )
     return "\n".join(lines)
@@ -469,6 +522,7 @@ class BenchmarkEvaluator:
         max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
         timezone_name=DEFAULT_TIMEZONE,
         model_client_factory=None,
+        execution_policy_override=None,
     ):
         self.benchmark_path = Path(benchmark_path)
         self.artifact_path = Path(artifact_path)
@@ -482,7 +536,17 @@ class BenchmarkEvaluator:
         self.max_new_tokens = max_new_tokens
         self.timezone_name = timezone_name
         self.model_client_factory = model_client_factory
-        self.repo_root = self.benchmark_path.resolve().parent.parent
+        self.execution_policy_override = (
+            dict(execution_policy_override) if execution_policy_override is not None else None
+        )
+        self.repo_root = self._find_repo_root(self.benchmark_path.resolve())
+
+    @staticmethod
+    def _find_repo_root(path):
+        for candidate in (path.parent, *path.parents):
+            if (candidate / "pyproject.toml").is_file() and (candidate / "pico").is_dir():
+                return candidate
+        return path.parent.parent
 
     def load(self):
         return load_benchmark(self.benchmark_path, repo_root=self.repo_root)
@@ -491,6 +555,7 @@ class BenchmarkEvaluator:
         benchmark = self.load()
         rows = [self.run_task(task) for task in benchmark["tasks"]]
         summary = summarize_rows(rows)
+        execution_metrics = summarize_execution_policy(rows)
         artifact = {
             "schema_version": BENCHMARK_SCHEMA_VERSION,
             "captured_at": _now_in_timezone(self.timezone_name),
@@ -517,6 +582,7 @@ class BenchmarkEvaluator:
                 "locale": _current_locale(),
             },
             "summary": summary,
+            "execution_metrics": execution_metrics,
             "failure_category_counts": summary["failure_category_counts"],
             "rows": rows,
         }
@@ -542,6 +608,9 @@ class BenchmarkEvaluator:
             model_client = self.model_client_factory(task=task, workspace=workspace)
         else:
             model_client = FakeModelClient(_scripted_outputs_for_task(task))
+        execution_policy = dict(task.get("execution_policy", {}) or {})
+        if self.execution_policy_override is not None:
+            execution_policy.update(self.execution_policy_override)
         agent = Pico(
             model_client=model_client,
             workspace=workspace,
@@ -556,6 +625,8 @@ class BenchmarkEvaluator:
             verify_command=task.get("verify_command", ""),
             verify_timeout=int(task.get("verify_timeout", 60)),
             max_verification_attempts=int(task.get("max_verification_attempts", 2)),
+            execution_policy=execution_policy,
+            task_mode=task.get("task_mode", "auto"),
         )
         _apply_task_setup(agent, task, fixture_copy_root)
 
@@ -583,16 +654,28 @@ class BenchmarkEvaluator:
             timeout=max(1, int(task.get("verifier_timeout", 60))),
             env=shell_env(root=fixture_copy_root),
         )
+        hidden_verifier = None
+        if task.get("hidden_verifier"):
+            self._install_hidden_files(task, fixture_copy_root)
+            hidden_verifier = run_verification(
+                fixture_copy_root,
+                task["hidden_verifier"],
+                timeout=max(1, int(task.get("hidden_verifier_timeout", 60))),
+                env=shell_env(root=fixture_copy_root),
+            )
 
         within_budget = task_state.tool_steps <= int(task["step_budget"])
-        verifier_passed = verifier.passed
-        non_failure_stop_reason = task_state.stop_reason == STOP_REASON_FINAL_ANSWER_RETURNED
-        passed = within_budget and verifier_passed and expected_artifact_exists and non_failure_stop_reason
+        public_verifier_passed = verifier.passed
+        hidden_verifier_passed = hidden_verifier.passed if hidden_verifier is not None else True
+        verifier_passed = public_verifier_passed and hidden_verifier_passed
+        expected_stop_reason = str(task.get("expected_stop_reason", STOP_REASON_FINAL_ANSWER_RETURNED))
+        expected_stop_reason_observed = task_state.stop_reason == expected_stop_reason
+        passed = within_budget and verifier_passed and expected_artifact_exists and expected_stop_reason_observed
         failure_category = None if passed else self._failure_category(
             within_budget=within_budget,
             verifier_passed=verifier_passed,
             expected_artifact_exists=expected_artifact_exists,
-            non_failure_stop_reason=non_failure_stop_reason,
+            non_failure_stop_reason=expected_stop_reason_observed,
         )
 
         return {
@@ -617,6 +700,13 @@ class BenchmarkEvaluator:
             "verifier_stderr": verifier.stderr,
             "verifier_error_code": verifier.error_code,
             "verifier_duration_ms": verifier.duration_ms,
+            "public_verifier_passed": public_verifier_passed,
+            "hidden_verifier_configured": hidden_verifier is not None,
+            "hidden_verifier_passed": hidden_verifier_passed,
+            "hidden_verifier_status": hidden_verifier.status if hidden_verifier is not None else "not_configured",
+            "hidden_verifier_exit_code": hidden_verifier.exit_code if hidden_verifier is not None else None,
+            "hidden_verifier_stdout": hidden_verifier.stdout if hidden_verifier is not None else "",
+            "hidden_verifier_stderr": hidden_verifier.stderr if hidden_verifier is not None else "",
             "verification": dict(report.get("verification", {}) or {}),
             "verification_attempts": task_state.verification_attempts,
             "category": task["category"],
@@ -626,7 +716,8 @@ class BenchmarkEvaluator:
             "within_budget": within_budget,
             "verifier_passed": verifier_passed,
             "expected_artifact_exists": expected_artifact_exists,
-            "non_failure_stop_reason": non_failure_stop_reason,
+            "expected_stop_reason": expected_stop_reason,
+            "non_failure_stop_reason": expected_stop_reason_observed,
             "tool_steps": task_state.tool_steps,
             "attempts": task_state.attempts,
             "final_answer": final_answer,
@@ -636,8 +727,20 @@ class BenchmarkEvaluator:
             "initial_task_summary_empty": initial_task_summary_empty,
             "initial_episodic_notes_empty": initial_episodic_notes_empty,
             "task_state": task_state.to_dict(),
+            "execution_policy": dict(report.get("execution_policy", {}) or {}),
             "report": report,
         }
+
+    def _install_hidden_files(self, task, fixture_copy_root):
+        for item in task.get("hidden_files", []):
+            source = (self.repo_root / str(item["source"])).resolve()
+            destination = (fixture_copy_root / str(item["destination"])).resolve()
+            source.relative_to(self.repo_root.resolve())
+            destination.relative_to(fixture_copy_root.resolve())
+            if not source.is_file():
+                raise ValueError(f"hidden verifier source does not exist: {item['source']}")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
 
     def _failure_category(
         self,
@@ -676,6 +779,7 @@ def run_fixed_benchmark(
     max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
     timezone_name=DEFAULT_TIMEZONE,
     model_client_factory=None,
+    execution_policy_override=None,
 ):
     evaluator = BenchmarkEvaluator(
         benchmark_path=benchmark_path,
@@ -688,6 +792,7 @@ def run_fixed_benchmark(
         max_new_tokens=max_new_tokens,
         timezone_name=timezone_name,
         model_client_factory=model_client_factory,
+        execution_policy_override=execution_policy_override,
     )
     return evaluator.run()
 
@@ -703,6 +808,7 @@ def run_harness_regression_v2(
     max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
     timezone_name=DEFAULT_TIMEZONE,
     model_client_factory=None,
+    execution_policy_override=None,
 ):
     return run_fixed_benchmark(
         benchmark_path=benchmark_path,
@@ -715,4 +821,5 @@ def run_harness_regression_v2(
         max_new_tokens=max_new_tokens,
         timezone_name=timezone_name,
         model_client_factory=model_client_factory,
+        execution_policy_override=execution_policy_override,
     )

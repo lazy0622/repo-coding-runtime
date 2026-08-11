@@ -1,5 +1,8 @@
 import json
+from pathlib import Path
+import subprocess
 import sys
+import threading
 import time
 
 from pico import FakeModelClient, Pico, SessionStore, WorkspaceContext
@@ -219,3 +222,91 @@ def test_v22_supervisor_resumes_persisted_graph(tmp_path):
     assert payload["resumed"] is True
     assert payload["recovered_tasks"] == ["inspect"]
     assert payload["status"] == "completed"
+
+
+def test_v3_supervisor_runs_independent_ready_tasks_concurrently(tmp_path):
+    class SlowConcurrentModel:
+        model = "concurrent-test"
+        supports_prompt_cache = False
+
+        def __init__(self):
+            self.prompts = []
+            self.last_completion_metadata = {}
+            self.active = 0
+            self.max_active = 0
+            self.lock = threading.Lock()
+
+        def complete(self, prompt, max_new_tokens, **kwargs):
+            del max_new_tokens, kwargs
+            self.prompts.append(prompt)
+            with self.lock:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+            time.sleep(0.45)
+            with self.lock:
+                self.active -= 1
+            return "<final>Independent evidence.</final>"
+
+    agent = Pico(
+        model_client=SlowConcurrentModel(),
+        workspace=WorkspaceContext.build(tmp_path),
+        session_store=SessionStore(tmp_path / ".pico" / "sessions"),
+        approval_policy="auto",
+        enable_subagents=True,
+    )
+    result = agent.execute_tool(
+        "run_task_graph",
+        {
+            "goal": "Parallel research",
+            "max_concurrency": 2,
+            "tasks": [
+                {"id": "a", "prompt": "Inspect A"},
+                {"id": "b", "prompt": "Inspect B"},
+            ],
+        },
+    )
+    assert json.loads(result.content)["completed_count"] == 2
+    assert agent.model_client.max_active == 2
+
+
+def test_v3_write_subagent_requires_authorization_and_keeps_main_workspace_clean(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    (tmp_path / "service.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "service.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=tmp_path, check=True)
+    patch_call = (
+        '<tool name="apply_patch"><patch>--- a/service.py\n+++ b/service.py\n'
+        '@@ -1 +1 @@\n-VALUE = 1\n+VALUE = 2\n</patch></tool>'
+    )
+    agent = Pico(
+        model_client=FakeModelClient([patch_call, "<final>Changed VALUE and inspected the diff.</final>"]),
+        workspace=WorkspaceContext.build(tmp_path),
+        session_store=SessionStore(tmp_path / ".pico" / "sessions"),
+        approval_policy="auto",
+        enable_subagents=True,
+    )
+
+    denied = agent.execute_tool(
+        "run_task_graph",
+        {"goal": "Write", "tasks": [{"id": "write", "mode": "write", "prompt": "Change VALUE"}]},
+    )
+    assert json.loads(denied.content)["status"] == "failed"
+
+    agent.model_client.outputs.extend([patch_call, "<final>Changed VALUE and inspected the diff.</final>"])
+    allowed = agent.execute_tool(
+        "run_task_graph",
+        {
+            "goal": "Write",
+            "allow_write_subagents": True,
+            "tasks": [{"id": "write", "mode": "write", "prompt": "Change VALUE"}],
+        },
+    )
+    payload = json.loads(allowed.content)
+    task = payload["tasks"][0]
+
+    assert payload["status"] == "completed"
+    assert (tmp_path / "service.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+    assert task["patch_path"]
+    assert "+VALUE = 2" in Path(task["patch_path"]).read_text(encoding="utf-8")

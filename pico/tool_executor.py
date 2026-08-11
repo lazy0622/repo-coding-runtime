@@ -117,6 +117,28 @@ class ToolGateway:
                 ),
             ))
 
+        task_state = getattr(agent, "current_task_state", None)
+        if task_state is not None:
+            allowed, policy_reason = agent.execution_policy.assess_tool(task_state, name)
+            if not allowed:
+                self._policy(name, "deny", policy_reason, tool=tool)
+                policy_guidance = (
+                    "stop verification loops and return the current evidence or a focused blocker"
+                    if policy_reason == "verification_budget_exceeded"
+                    else "apply a minimal patch or return a focused blocker"
+                )
+                return self._finish(name, args, ToolExecutionResult(
+                    content=(
+                        f"error: execution policy blocked {name} because {policy_reason}; {policy_guidance}"
+                    ),
+                    metadata=_metadata(
+                        "rejected",
+                        tool_error_code=policy_reason,
+                        risk_level="high" if tool["risky"] else "low",
+                        read_only=not tool["risky"],
+                    ),
+                ))
+
         try:
             agent.validate_tool(name, args)
         except Exception as exc:

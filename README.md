@@ -4,6 +4,44 @@ Repo Coding Runtime 是一个面向代码仓库的本地 Coding Agent Runtime。
 
 它更像一个能在仓库里持续工作的命令行 Coding Agent，不是纯聊天窗口。你可以拿它做代码排查、测试修复、仓库分析，或者让它在当前项目里执行一次性的工程任务。
 
+```mermaid
+flowchart LR
+    U["User task"] --> S["Supervisor / Execution Policy"]
+    S --> I["Persistent Repo Index"]
+    S --> A["Agent Loop"]
+    A --> G["Tool Gateway + Approval + Safety"]
+    G --> T["Read / Patch / Shell / MCP"]
+    T --> V["Tests and hidden verifier"]
+    V -->|pass| R["Checkpoint + Trace + Report"]
+    V -->|fail within budget| A
+    S --> M["Memory + Context Compression"]
+    S --> Q["TaskGraph + isolated Sub-Agents"]
+```
+
+## 30 秒体验
+
+```powershell
+git clone https://github.com/lazy0622/repo-coding-runtime.git
+cd repo-coding-runtime
+pip install -e .
+Copy-Item .env.example .env   # 填入 PICO_DEEPSEEK_API_KEY
+repo --cwd . --task-mode inspect "定位 ExecutionPolicy 的阶段预算实现并给出证据"
+```
+
+一次修改任务会形成可审计闭环：Repo Index 定位代码 → 受控工具修改 → 自动验证 → 失败后限次修复或回滚 → 保存 `.pico/runs/<run_id>/report.json`。
+
+## Benchmark 快照
+
+| 评测层 | 固定任务 | 当前结果 | 能证明什么 |
+| --- | ---: | ---: | --- |
+| RepoRuntimeBench | 24 | 24/24 | Harness、工具、安全、恢复和隐藏验证合同 |
+| Execution Policy 消融 | 24 | 23/24 → 24/24 | 相同 fixture/脚本输出下纠正 premature final |
+| DeepSeek development | 6 | policy on 6/6；off 6/6 | 单次固定开发集可运行性，不代表通用成功率 |
+| Security quality | 3 次固定场景 | 拦截 100%；误拦截 0%；泄漏 0% | 当前本地工具与工件边界，不等于完整渗透测试 |
+| SWE-bench Lite Mini | 10 个预先固定实例 | 待官方 Docker Harness 裁决 | 真实仓库 issue 解决能力 |
+
+完整口径、失败记录与数据来源见 [`benchmarks/reporuntimebench/results/v3-evaluation-summary.md`](benchmarks/reporuntimebench/results/v3-evaluation-summary.md)。固定 fixture 结果和真实模型结果严格分层，不把本地回归冒充 SWE-bench solve rate。
+
 ## 适合做什么
 
 - 在本地仓库里排查测试失败
@@ -373,16 +411,18 @@ get_file_outline → find_symbol/find_references → preview_diff
 </patch></tool>
 ```
 
-Repo Index 是按文件指纹复用的内存索引，不会把整个仓库预加载到 prompt；
+Repo Index 使用 Python AST 与 Java/JavaScript/TypeScript/Go/Rust 的保守结构提取器，
+按文件指纹复用并持久化到 `.pico/index/repo-index-v2.json`；它不会把整个仓库预加载到 prompt，
 Agent 仍需通过工具按需读取源码。补丁备份属于本地运行状态，默认写入被忽略的
 `.pico/` 目录，不作为业务源码提交。
 
-## V2：Supervisor + Task Graph + Read-only Sub-Agents
+## V2/V3：Supervisor + Concurrent Task Graph + Isolated Write Sub-Agents
 
 V2 把 V1 中实验性的 `delegate` 发展为一个有边界的多 Agent Supervisor：
 
 - `TaskGraph` 校验任务 ID、依赖关系和循环，并按依赖就绪顺序调度任务；失败会向下游传播为 `blocked`。
-- `run_task_graph` 启动最多 6 个 bounded read-only 子 Agent。子 Agent 只能使用仓库读取、Repo Index 和 Diff 预览工具，不能写文件、执行 shell 或继续派生 Agent。
+- `run_task_graph` 启动最多 6 个 bounded 子 Agent，默认最多 2 路并发、上限 4。研究任务保持只读。
+- `mode=write` 的任务必须同时显式设置 `allow_write_subagents=true`，并强制创建 detached Git worktree；它只能输出 `workspace.patch` 和验证证据，不会自动提交或合并到主工作区。
 - 每个子 Agent 有独立的 Session、RunStore 和 `task_graph.json`；父任务 Trace 记录 `subagent_started` / `subagent_finished` 生命周期事件。
 - 依赖任务的研究结论会注入后续子任务，Supervisor 最后返回结构化任务状态和 artifacts 位置。
 - `--isolate_worktrees` 可在 Git 仓库中为子任务申请 detached worktree；非 Git 环境会安全降级为只读共享工作区并记录原因。
@@ -393,7 +433,7 @@ V2 把 V1 中实验性的 `delegate` 发展为一个有边界的多 Agent Superv
 python -m pico --v2 "先梳理仓库结构，再分析 runtime 的依赖关系"
 ```
 
-V2 当前采用确定性的串行调度，主 Agent 仍是唯一负责代码写入的角色；子 Agent 负责任务拆分上的“分工”，但不会未经 Supervisor 审核修改源码。运行工件位于：
+依赖拓扑仍由 Supervisor 确定，同一 ready batch 才会有界并发。写任务不会未经审核污染主工作区。运行工件位于：
 
 ```text
 .pico/runs/<run_id>/subagents/<graph_id>/
@@ -403,7 +443,7 @@ V2 当前采用确定性的串行调度，主 Agent 仍是唯一负责代码写�
     └── runs/<child_run_id>/
 ```
 
-这使得 V2 可以在面试中清楚回答：任务如何拆分、依赖如何保证、子 Agent 如何受限、失败如何传播，以及每个子任务如何复盘。V2 不宣称已经实现分布式并行 Agent、跨机器队列或自动合并子 Agent 代码。
+这使得项目可以清楚回答：任务如何拆分、依赖如何保证、并发如何限流、写权限如何隔离、失败如何传播，以及每个子任务如何复盘。项目不宣称已经实现分布式队列、跨机器调度或自动合并子 Agent 代码。
 
 ## V2.1–V2.4：结构化证据、恢复控制与 Coding Workflow
 
@@ -427,7 +467,25 @@ V2 当前采用确定性的串行调度，主 Agent 仍是唯一负责代码写�
 python scripts/run_v2_4_demos.py
 ```
 
-Demo 会分别验证成功交付和验证失败自动回滚。当前调度仍是串行的；超时使用 provider 调用的线程预算，不能强制终止一个不响应的第三方进程，因此生产接入仍应选择支持取消/请求超时的模型客户端。
+Demo 会分别验证成功交付和验证失败自动回滚。超时使用 provider 调用的线程预算，不能强制终止一个不响应的第三方进程，因此生产接入仍应选择支持取消/请求超时的模型客户端。
+
+## V3：真实仓库评测与安全质量指标
+
+- `scripts/run_swebench.py` 从真实 Git 仓库和固定 commit 生成官方 SWE-bench `predictions.jsonl`，最终 solve rate 必须交给官方 Docker harness 判定。
+- `run_security_quality_suite` 同时报告攻击拦截率、正常操作误拦截率和 secret 泄漏率，避免只展示“拦截次数”。
+- 内置 scripted benchmark 继续用于运行时回归；它不能替代 SWE-bench，也不能作为代码修复能力的 solve rate。
+- `ExecutionPolicy` 在通用生命周期状态之外维护 `explore → diagnose → edit → verify → finish` 工作阶段；`--task-mode auto|inspect|edit|verify` 显式声明任务合同，修改型请求若没有成功写入工作区，Runtime 会拒绝过早的 final，并通过探索、诊断、首次编辑、验证和修复预算打断只读循环。
+- 无法安全继续时，模型可以返回结构化 `<blocked>`（原因、证据、所需输入、分类），Runtime 会把它作为独立终态写入 TaskState、Checkpoint、Trace 和 Report，不再把“缺少输入”伪装成失败或成功。
+- `RepoRuntimeBench v1` 使用 24 个固定 fixture 任务验证单文件/跨文件修复、只读检查、结构化阻塞、协议与工具错误恢复、阶段预算、过早结束纠正、重复读取抑制和验证失败后修复；隐藏测试在 Agent 结束后才注入。报告支持相同任务、相同输出下的 policy on/off 消融。它证明 Harness 合同，不冒充真实模型或 SWE-bench solve rate。
+
+运行本地执行策略评测：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_reporuntime_benchmark.py
+.\.venv\Scripts\python.exe scripts\run_policy_ablation.py
+```
+
+使用方法和实验分层见 `benchmarks/reporuntimebench/README.md` 与 `benchmarks/swebench/README.md`；关键架构取舍见 `docs/architecture/decisions.md`。
 
 ## 安全与持久化
 

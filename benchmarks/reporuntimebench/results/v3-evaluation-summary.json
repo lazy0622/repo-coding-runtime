@@ -1,0 +1,33 @@
+{
+  "captured_on": "2026-08-10",
+  "deterministic": {
+    "tasks": 24,
+    "passed": 24,
+    "pass_rate": 1.0,
+    "verifier_pass_rate": 1.0,
+    "patch_generation_rate": 1.0,
+    "average_first_edit_step": 1.6666666666666667,
+    "read_only_tool_ratio": 0.3902439024390244
+  },
+  "policy_ablation": {
+    "scope": "same fixtures and scripted outputs; harness behavior only",
+    "off": {"passed": 23, "tasks": 24, "pass_rate": 0.9583333333333334},
+    "on": {"passed": 24, "tasks": 24, "pass_rate": 1.0}
+  },
+  "deepseek_development": {
+    "scope": "six fixed local tasks, temperature 0, one run per condition",
+    "off": {"passed": 6, "tasks": 6, "average_first_edit_step": 2.8333333333333335, "read_only_tool_ratio": 0.4230769230769231},
+    "on": {"passed": 6, "tasks": 6, "average_first_edit_step": 3.1666666666666665, "read_only_tool_ratio": 0.4}
+  },
+  "security_quality": {
+    "repetitions": 3,
+    "attack_block_rate": 1.0,
+    "false_block_rate": 0.0,
+    "secret_leak_rate": 0.0
+  },
+  "swebench": {
+    "pinned_instances": 10,
+    "official_resolved_score": null,
+    "blocker": "Docker Desktop Linux engine was not running"
+  }
+}

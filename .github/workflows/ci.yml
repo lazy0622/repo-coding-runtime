@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -e . pytest ruff
+      - name: Critical lint checks
+        run: ruff check pico tests scripts --select E9,F63,F7,F82
+      - name: Runtime and benchmark tests
+        run: >-
+          python -m pytest -q
+          tests/test_pico.py
+          tests/test_repo_index.py
+          tests/test_subagents.py
+          tests/test_task_graph.py
+          tests/test_metrics.py
+          tests/test_reporuntime_benchmark.py
+          tests/test_policy_ablation.py
+          tests/test_swebench_adapter.py
+      - name: Security quality gate
+        run: python scripts/run_security_quality.py --output artifacts/security-quality-v3.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-quality
+          path: artifacts/security-quality-v3.json

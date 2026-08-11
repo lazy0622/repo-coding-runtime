@@ -7,9 +7,9 @@ runtime 只关心一件事：给我一个 prompt，我拿回一段文本。
 
 import json
 import time
-from http.client import RemoteDisconnected
 import urllib.error
 import urllib.request
+from http.client import RemoteDisconnected
 
 OPENAI_COMPATIBLE_USER_AGENT = "pico/0.1"
 
@@ -392,6 +392,13 @@ class AnthropicCompatibleModelClient:
         }
         if self.temperature is not None:
             payload["temperature"] = self.temperature
+        # DeepSeek V4 defaults to thinking mode. This runtime uses an external
+        # multi-step Agent Loop and does not replay provider reasoning blocks
+        # between tool turns, so non-thinking mode is the compatible default.
+        # It also prevents a bounded response from containing only a thinking
+        # block and no parseable text/tool protocol.
+        if "api.deepseek.com/anthropic" in self.base_url.lower():
+            payload["thinking"] = {"type": "disabled"}
 
         headers = {
             "Content-Type": "application/json",

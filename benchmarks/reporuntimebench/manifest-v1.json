@@ -1,0 +1,252 @@
+{
+  "schema_version": 1,
+  "description": "RepoRuntimeBench v1: 24 deterministic local-repository tasks for runtime and supervisor regression. Results do not represent live-model quality or SWE-bench performance.",
+  "defaults": {
+    "fixture_repo": "tests/fixtures/reporuntimebench_python",
+    "allowed_tools": ["read_file", "get_file_outline", "find_references", "patch_file"],
+    "step_budget": 7,
+    "task_mode": "edit"
+  },
+  "tasks": [
+    {
+      "id": "rrb_01_add",
+      "prompt": "Fix app/calculator.py so add returns the sum of its arguments.",
+      "expected_artifact": "add performs addition",
+      "artifact_path": "app/calculator.py",
+      "verifier": "python -c \"from app.calculator import add; assert add(2,3)==5; assert add(-2,1)==-1\"",
+      "category": "single-file-bugfix",
+      "scripted_outputs": ["<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"app/calculator.py\",\"start\":1,\"end\":8}}</tool>", "<tool name=\"patch_file\" path=\"app/calculator.py\"><old_text>return left - right</old_text><new_text>return left + right</new_text></tool>", "<final>Fixed add.</final>"]
+    },
+    {
+      "id": "rrb_02_premature_final",
+      "prompt": "Update app/status.py so STATUS is ready.",
+      "expected_artifact": "status ready",
+      "artifact_path": "app/status.py",
+      "verifier": "python -c \"from app.status import STATUS; assert STATUS=='ready'\"",
+      "category": "supervisor-recovery",
+      "scripted_outputs": ["<final>Updated.</final>", "<tool name=\"patch_file\" path=\"app/status.py\"><old_text>STATUS = \"pending\"</old_text><new_text>STATUS = \"ready\"</new_text></tool>", "<final>Updated.</final>"]
+    },
+    {
+      "id": "rrb_03_repeated_read",
+      "prompt": "Fix add and avoid repeated repository reads.",
+      "allowed_tools": ["read_file", "patch_file"],
+      "expected_artifact": "repeat suppression",
+      "artifact_path": "app/calculator.py",
+      "verifier": "python -c \"from app.calculator import add; assert add(7,4)==11\"",
+      "category": "repeat-suppression",
+      "scripted_outputs": ["<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"app/calculator.py\",\"start\":1,\"end\":8}}</tool>", "<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"app/calculator.py\",\"start\":1,\"end\":8}}</tool>", "<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"app/calculator.py\",\"start\":1,\"end\":8}}</tool>", "<tool name=\"patch_file\" path=\"app/calculator.py\"><old_text>return left - right</old_text><new_text>return left + right</new_text></tool>", "<final>Fixed.</final>"]
+    },
+    {
+      "id": "rrb_04_first_edit_deadline",
+      "prompt": "Fix clamp so it respects inclusive bounds.",
+      "expected_artifact": "bounded discovery",
+      "artifact_path": "app/calculator.py",
+      "verifier": "python -c \"from app.calculator import clamp; assert clamp(-2,0,10)==0; assert clamp(12,0,10)==10; assert clamp(5,0,10)==5\"",
+      "category": "first-edit-deadline",
+      "execution_policy": {"explore_budget": 2, "first_edit_deadline": 3},
+      "scripted_outputs": ["<tool>{\"name\":\"get_file_outline\",\"args\":{\"path\":\"app/calculator.py\"}}</tool>", "<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"app/calculator.py\",\"start\":1,\"end\":8}}</tool>", "<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"README.md\",\"start\":1,\"end\":4}}</tool>", "<tool name=\"patch_file\" path=\"app/calculator.py\"><old_text>return min(low, max(high, value))</old_text><new_text>return max(low, min(high, value))</new_text></tool>", "<final>Fixed clamp.</final>"]
+    },
+    {
+      "id": "rrb_05_cross_file_timeout",
+      "prompt": "Make connect_timeout follow DEFAULT_TIMEOUT.",
+      "expected_artifact": "shared timeout",
+      "artifact_path": "app/client.py",
+      "verifier": "python -c \"from app.client import connect_timeout; assert connect_timeout()==30\"",
+      "category": "cross-file-bugfix",
+      "scripted_outputs": ["<tool>{\"name\":\"find_references\",\"args\":{\"name\":\"DEFAULT_TIMEOUT\",\"path\":\"app\"}}</tool>", "<tool name=\"patch_file\" path=\"app/client.py\"><old_text>return 10</old_text><new_text>return DEFAULT_TIMEOUT</new_text></tool>", "<final>Used shared config.</final>"]
+    },
+    {
+      "id": "rrb_06_verification_repair",
+      "prompt": "Set STATUS to passed and verify it.",
+      "allowed_tools": ["patch_file"],
+      "expected_artifact": "repair after verifier feedback",
+      "artifact_path": "app/status.py",
+      "verify_command": "python -B -c \"from app.status import STATUS; assert STATUS=='passed'\"",
+      "max_verification_attempts": 2,
+      "verifier": "python -B -c \"from app.status import STATUS; assert STATUS=='passed'\"",
+      "category": "verification-repair",
+      "scripted_outputs": ["<tool name=\"patch_file\" path=\"app/status.py\"><old_text>STATUS = \"pending\"</old_text><new_text>STATUS = \"almost\"</new_text></tool>", "<final>Updated.</final>", "<tool name=\"patch_file\" path=\"app/status.py\"><old_text>STATUS = \"almost\"</old_text><new_text>STATUS = \"passed\"</new_text></tool>", "<final>Repaired.</final>"]
+    },
+    {
+      "id": "rrb_07_hidden_text_contract",
+      "prompt": "Fix normalize_name and slugify to satisfy their docstrings.",
+      "allowed_tools": ["read_file", "patch_file"],
+      "step_budget": 6,
+      "expected_artifact": "text contract",
+      "artifact_path": "app/text.py",
+      "verifier": "python -c \"from app.text import normalize_name,slugify; assert normalize_name(' A ' )=='a'; assert slugify('Hello World')=='hello-world'\"",
+      "hidden_files": [{"source": "benchmarks/reporuntimebench/hidden/test_text_contract.py", "destination": "hidden_tests/test_text_contract.py"}],
+      "hidden_verifier": "python -m hidden_tests.test_text_contract",
+      "category": "hidden-contract",
+      "scripted_outputs": ["<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"app/text.py\",\"start\":1,\"end\":20}}</tool>", "<tool name=\"patch_file\" path=\"app/text.py\"><old_text>return value.strip()</old_text><new_text>return value.strip().lower()</new_text></tool>", "<tool name=\"patch_file\" path=\"app/text.py\"><old_text>return re.sub(r\"\\s+\", \"_\", value.strip().lower())</old_text><new_text>return re.sub(r\"\\s+\", \"-\", value.strip().lower())</new_text></tool>", "<final>Fixed normalization.</final>"]
+    },
+    {
+      "id": "rrb_08_parse_port",
+      "prompt": "Fix parse_port so it returns an integer.",
+      "expected_artifact": "integer port",
+      "artifact_path": "app/parser.py",
+      "verifier": "python -c \"from app.parser import parse_port; assert parse_port('8080')==8080\"",
+      "category": "single-file-bugfix",
+      "scripted_outputs": ["<tool name=\"patch_file\" path=\"app/parser.py\"><old_text>return value</old_text><new_text>return int(value)</new_text></tool>", "<final>Fixed port parsing.</final>"]
+    },
+    {
+      "id": "rrb_09_split_pair",
+      "prompt": "Fix split_pair for key=value input.",
+      "expected_artifact": "pair parsing",
+      "artifact_path": "app/parser.py",
+      "verifier": "python -c \"from app.parser import split_pair; assert split_pair('a=b')==('a','b')\"",
+      "category": "single-file-bugfix",
+      "scripted_outputs": ["<tool name=\"patch_file\" path=\"app/parser.py\"><old_text>value.split(\":\", 1)</old_text><new_text>value.split(\"=\", 1)</new_text></tool>", "<final>Fixed pair parsing.</final>"]
+    },
+    {
+      "id": "rrb_10_shared_retries",
+      "prompt": "Make retry_count use DEFAULT_RETRIES.",
+      "expected_artifact": "shared retry config",
+      "artifact_path": "app/service.py",
+      "verifier": "python -c \"from app.service import retry_count; assert retry_count()==3\"",
+      "category": "cross-file-bugfix",
+      "scripted_outputs": ["<tool>{\"name\":\"find_references\",\"args\":{\"name\":\"DEFAULT_RETRIES\",\"path\":\"app\"}}</tool>", "<tool name=\"patch_file\" path=\"app/service.py\"><old_text>return 1</old_text><new_text>return DEFAULT_RETRIES</new_text></tool>", "<final>Used shared retries.</final>"]
+    },
+    {
+      "id": "rrb_11_api_prefix",
+      "prompt": "Make users_endpoint include API_PREFIX.",
+      "expected_artifact": "prefixed endpoint",
+      "artifact_path": "app/service.py",
+      "verifier": "python -c \"from app.service import users_endpoint; assert users_endpoint()=='/v1/users'\"",
+      "category": "cross-file-bugfix",
+      "scripted_outputs": ["<tool name=\"patch_file\" path=\"app/service.py\"><old_text>return \"/users\"</old_text><new_text>return f\"{API_PREFIX}/users\"</new_text></tool>", "<final>Prefixed endpoint.</final>"]
+    },
+    {
+      "id": "rrb_12_even_predicate",
+      "prompt": "Fix is_even.",
+      "expected_artifact": "even predicate",
+      "artifact_path": "app/validation.py",
+      "verifier": "python -c \"from app.validation import is_even; assert is_even(2); assert not is_even(3)\"",
+      "category": "single-file-bugfix",
+      "scripted_outputs": ["<tool name=\"patch_file\" path=\"app/validation.py\"><old_text>return value % 2 == 1</old_text><new_text>return value % 2 == 0</new_text></tool>", "<final>Fixed predicate.</final>"]
+    },
+    {
+      "id": "rrb_13_non_empty",
+      "prompt": "Make non_empty reject whitespace-only strings.",
+      "expected_artifact": "trimmed validation",
+      "artifact_path": "app/validation.py",
+      "verifier": "python -c \"from app.validation import non_empty; assert non_empty(' x '); assert not non_empty('   ')\"",
+      "category": "edge-case-repair",
+      "scripted_outputs": ["<tool name=\"patch_file\" path=\"app/validation.py\"><old_text>return bool(value)</old_text><new_text>return bool(value.strip())</new_text></tool>", "<final>Handled whitespace.</final>"]
+    },
+    {
+      "id": "rrb_14_greeting",
+      "prompt": "Add an exclamation mark to greeting output.",
+      "expected_artifact": "greeting punctuation",
+      "artifact_path": "app/formatting.py",
+      "verifier": "python -c \"from app.formatting import greeting; assert greeting('Ada')=='Hello Ada!'\"",
+      "category": "single-file-bugfix",
+      "scripted_outputs": ["<tool name=\"patch_file\" path=\"app/formatting.py\"><old_text>return f\"Hello {name}\"</old_text><new_text>return f\"Hello {name}!\"</new_text></tool>", "<final>Updated greeting.</final>"]
+    },
+    {
+      "id": "rrb_15_percent",
+      "prompt": "Fix as_percent so 0.25 renders as 25%.",
+      "expected_artifact": "percentage scaling",
+      "artifact_path": "app/formatting.py",
+      "verifier": "python -c \"from app.formatting import as_percent; assert as_percent(.25)=='25%'\"",
+      "category": "edge-case-repair",
+      "scripted_outputs": ["<tool name=\"patch_file\" path=\"app/formatting.py\"><old_text>{value:.0f}%</old_text><new_text>{value * 100:.0f}%</new_text></tool>", "<final>Scaled percentage.</final>"]
+    },
+    {
+      "id": "rrb_16_config_propagation",
+      "prompt": "Change DEFAULT_TIMEOUT to 45; consumers must observe it.",
+      "expected_artifact": "config propagation",
+      "artifact_path": "app/config.py",
+      "verifier": "python -c \"from app.config import DEFAULT_TIMEOUT; assert DEFAULT_TIMEOUT==45\"",
+      "category": "configuration-change",
+      "scripted_outputs": ["<tool name=\"patch_file\" path=\"app/config.py\"><old_text>DEFAULT_TIMEOUT = 30</old_text><new_text>DEFAULT_TIMEOUT = 45</new_text></tool>", "<final>Updated timeout.</final>"]
+    },
+    {
+      "id": "rrb_17_inspect_symbol",
+      "prompt": "Inspect where DEFAULT_TIMEOUT is defined and summarize it without editing.",
+      "allowed_tools": ["find_references", "read_file"],
+      "task_mode": "inspect",
+      "expected_artifact": "config remains present",
+      "artifact_path": "app/config.py",
+      "verifier": "python -c \"from app.config import DEFAULT_TIMEOUT; assert DEFAULT_TIMEOUT==30\"",
+      "category": "repository-inspection",
+      "scripted_outputs": ["<tool>{\"name\":\"find_references\",\"args\":{\"name\":\"DEFAULT_TIMEOUT\",\"path\":\"app\"}}</tool>", "<final>DEFAULT_TIMEOUT is defined in app/config.py and imported by app/client.py.</final>"]
+    },
+    {
+      "id": "rrb_18_inspect_outline",
+      "prompt": "Inspect app/parser.py and list its public functions without editing.",
+      "allowed_tools": ["get_file_outline"],
+      "task_mode": "inspect",
+      "expected_artifact": "parser remains present",
+      "artifact_path": "app/parser.py",
+      "verifier": "python -c \"import app.parser; assert hasattr(app.parser,'parse_port')\"",
+      "category": "repository-inspection",
+      "scripted_outputs": ["<tool>{\"name\":\"get_file_outline\",\"args\":{\"path\":\"app/parser.py\"}}</tool>", "<final>The module exposes parse_port and split_pair.</final>"]
+    },
+    {
+      "id": "rrb_19_structured_blocked",
+      "prompt": "Edit secrets/production.key, but stop with evidence if it is absent.",
+      "allowed_tools": ["read_file"],
+      "task_mode": "inspect",
+      "expected_artifact": "fixture remains intact",
+      "artifact_path": "README.md",
+      "expected_stop_reason": "blocked",
+      "verifier": "python -c \"from pathlib import Path; assert not Path('secrets/production.key').exists()\"",
+      "category": "structured-blocker",
+      "scripted_outputs": ["<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"secrets/production.key\",\"start\":1,\"end\":2}}</tool>", "<blocked>{\"reason\":\"production key is absent\",\"evidence\":[\"read_file returned file not found\"],\"required_input\":\"provide a non-production fixture key\",\"category\":\"missing_input\"}</blocked>"]
+    },
+    {
+      "id": "rrb_20_invalid_args_recovery",
+      "prompt": "Fix parse_port after recovering from malformed tool arguments.",
+      "allowed_tools": ["patch_file"],
+      "expected_artifact": "invalid args recovery",
+      "artifact_path": "app/parser.py",
+      "verifier": "python -c \"from app.parser import parse_port; assert parse_port('9')==9\"",
+      "category": "tool-error-recovery",
+      "scripted_outputs": ["<tool>{\"name\":\"patch_file\",\"args\":{\"path\":\"app/parser.py\",\"old_text\":\"return value\"}}</tool>", "<tool name=\"patch_file\" path=\"app/parser.py\"><old_text>return value</old_text><new_text>return int(value)</new_text></tool>", "<final>Recovered and fixed.</final>"]
+    },
+    {
+      "id": "rrb_21_path_escape_recovery",
+      "prompt": "Fix is_even without reading outside the repository.",
+      "allowed_tools": ["read_file", "patch_file"],
+      "expected_artifact": "path safety recovery",
+      "artifact_path": "app/validation.py",
+      "verifier": "python -c \"from app.validation import is_even; assert is_even(8)\"",
+      "category": "safety-recovery",
+      "scripted_outputs": ["<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"../outside.txt\",\"start\":1,\"end\":1}}</tool>", "<tool name=\"patch_file\" path=\"app/validation.py\"><old_text>return value % 2 == 1</old_text><new_text>return value % 2 == 0</new_text></tool>", "<final>Stayed within the workspace.</final>"]
+    },
+    {
+      "id": "rrb_22_second_verification_repair",
+      "prompt": "Set STATUS to healthy and repair any failed verification.",
+      "allowed_tools": ["patch_file"],
+      "expected_artifact": "second repair flow",
+      "artifact_path": "app/status.py",
+      "verify_command": "python -B -c \"from app.status import STATUS; assert STATUS=='healthy'\"",
+      "max_verification_attempts": 2,
+      "verifier": "python -B -c \"from app.status import STATUS; assert STATUS=='healthy'\"",
+      "category": "verification-repair",
+      "scripted_outputs": ["<tool name=\"patch_file\" path=\"app/status.py\"><old_text>STATUS = \"pending\"</old_text><new_text>STATUS = \"unhealthy\"</new_text></tool>", "<final>Done.</final>", "<tool name=\"patch_file\" path=\"app/status.py\"><old_text>STATUS = \"unhealthy\"</old_text><new_text>STATUS = \"healthy\"</new_text></tool>", "<final>Repaired.</final>"]
+    },
+    {
+      "id": "rrb_23_diagnose_budget",
+      "prompt": "Fix split_pair using bounded diagnosis.",
+      "allowed_tools": ["read_file", "patch_file"],
+      "execution_policy": {"explore_budget": 1, "diagnose_budget": 1, "first_edit_deadline": 4},
+      "expected_artifact": "diagnosis budget",
+      "artifact_path": "app/parser.py",
+      "verifier": "python -c \"from app.parser import split_pair; assert split_pair('x=y')==('x','y')\"",
+      "category": "stage-budget",
+      "scripted_outputs": ["<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"app/parser.py\",\"start\":1,\"end\":12}}</tool>", "<tool>{\"name\":\"read_file\",\"args\":{\"path\":\"README.md\",\"start\":1,\"end\":4}}</tool>", "<tool name=\"patch_file\" path=\"app/parser.py\"><old_text>value.split(\":\", 1)</old_text><new_text>value.split(\"=\", 1)</new_text></tool>", "<final>Fixed within budget.</final>"]
+    },
+    {
+      "id": "rrb_24_malformed_blocked_recovery",
+      "prompt": "Fix greeting and recover from malformed structured output.",
+      "allowed_tools": ["patch_file"],
+      "expected_artifact": "protocol recovery",
+      "artifact_path": "app/formatting.py",
+      "verifier": "python -c \"from app.formatting import greeting; assert greeting('Lin')=='Hello Lin!'\"",
+      "category": "protocol-recovery",
+      "scripted_outputs": ["<blocked>not-json</blocked>", "<tool name=\"patch_file\" path=\"app/formatting.py\"><old_text>return f\"Hello {name}\"</old_text><new_text>return f\"Hello {name}!\"</new_text></tool>", "<final>Recovered.</final>"]
+    }
+  ]
+}

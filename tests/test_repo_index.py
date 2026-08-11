@@ -75,3 +75,43 @@ def test_repo_index_rejects_paths_outside_workspace(tmp_path):
 
     with pytest.raises(ValueError, match="path escapes workspace"):
         index.file_outline(tmp_path.parent / "outside.py")
+
+
+def test_repo_index_extracts_multilanguage_structure_and_references(tmp_path):
+    (tmp_path / "Service.java").write_text(
+        "import java.util.List;\npublic class Service {\n  public String run() { return helper(); }\n  private String helper() { return \"ok\"; }\n}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "worker.ts").write_text(
+        "import { api } from './api';\nexport function run() { return api(); }\nconst helper = () => run();\n",
+        encoding="utf-8",
+    )
+    index = RepoIndex(tmp_path)
+
+    java = index.file_outline("Service.java")
+    typescript = index.file_outline("worker.ts")
+    references = index.find_references("run", ".")
+
+    assert java["language"] == "java"
+    assert {item["name"] for item in java["symbols"]} >= {"Service", "run", "helper"}
+    assert java["imports"] == ["java.util.List"]
+    assert typescript["language"] == "typescript"
+    assert {item["name"] for item in typescript["symbols"]} >= {"run", "helper"}
+    assert any(item["kind"] == "token" and item["path"] == "worker.ts" for item in references["results"])
+
+
+def test_repo_index_persists_and_invalidates_file_records(tmp_path):
+    source = tmp_path / "service.py"
+    source.write_text("def before():\n    return 1\n", encoding="utf-8")
+    first = RepoIndex(tmp_path)
+    first.refresh(".")
+
+    second = RepoIndex(tmp_path)
+    cached = second.refresh(".")
+    assert cached["files_reused"] == 1
+    assert (tmp_path / ".pico" / "index" / "repo-index-v2.json").is_file()
+
+    source.write_text("def after():\n    return 2\n", encoding="utf-8")
+    refreshed = second.refresh(".")
+    assert refreshed["files_reused"] == 0
+    assert second.find_symbol("after")["count"] == 1

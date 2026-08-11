@@ -1,0 +1,41 @@
+# Real-repository benchmark
+
+This adapter evaluates repository work rather than scripted tool-call syntax.
+Each manifest row points to a real Git repository and base commit. The adapter
+creates a clean checkout, gives the issue to an agent command, captures its Git
+diff, and writes the official SWE-bench JSONL predictions format.
+
+`mini-v1-selection.json` pre-registers ten instances before model execution.
+`development-v1-selection.json` fixes five of those instances across Astropy
+and Django, including the model and execution budget, for three repeated runs.
+Keep model, temperature, token/tool budget, timeout and subset IDs fixed. Grade
+every `predictions.jsonl` with the official Docker harness; generation success
+and non-empty patches are diagnostics, not solve-rate claims.
+
+```powershell
+python scripts/prepare_swebench_mini.py `
+  --selection benchmarks/swebench/development-v1-selection.json `
+  --output artifacts/swebench-development-v1/instances.jsonl
+
+python scripts/run_swebench.py `
+  --manifest artifacts/swebench-development-v1/instances.jsonl `
+  --output artifacts/swebench-development-v1/runs `
+  --repetitions 3 `
+  --timeout 900 `
+  --model-name deepseek-v4-pro `
+  --agent-command-json '["python","-m","pico","--provider","deepseek","--model","deepseek-v4-pro","--approval","auto","--task-mode","edit","--max-steps","24","--max-new-tokens","4096","{problem_statement}"]'
+```
+
+The manifest accepts official fields (`instance_id`, `repo`, `base_commit`,
+`problem_statement`) and an optional local `repo_path` for offline smoke tests.
+
+`mini-v1-selection.json` pins the first ten SWE-bench Lite test rows before any
+model run. Resolve their repository commits and problem statements with
+`python scripts/prepare_swebench_mini.py`. This prevents selecting only tasks
+that happened to succeed. Official grading requires a running Linux Docker
+engine; patch generation on Windows is not an official resolved score.
+
+Report both successes and failures. The experiment summary records agent
+completion rate, non-empty patch rate, average tool steps and average first-edit
+step. Only the official harness report may be used for test-pass/solve-rate
+claims.

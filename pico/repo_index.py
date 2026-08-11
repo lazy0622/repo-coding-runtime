@@ -1,9 +1,9 @@
-"""Small, deterministic repository index for coding-agent navigation.
+"""Small, deterministic and persistent repository index.
 
-The index intentionally starts with Python AST facts instead of attempting to
-be a language-server replacement.  It gives the agent a cheap structural view
-of a repository, while keeping the source of truth on disk and refreshing
-individual files when their fingerprints change.
+Python uses the standard-library AST.  Other common repository languages use
+conservative structural extractors: they are navigation hints, not compiler or
+language-server facts.  The source tree remains authoritative and fingerprints
+invalidate stale cache entries.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,17 @@ from .workspace import IGNORED_PATH_NAMES
 
 
 MAX_INDEX_FILE_BYTES = 2 * 1024 * 1024
+INDEX_SCHEMA_VERSION = "repo-index-v2"
+LANGUAGE_BY_SUFFIX = {
+    ".py": "python",
+    ".java": "java",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".go": "go",
+    ".rs": "rust",
+}
 
 
 @dataclass(frozen=True)
@@ -42,10 +54,23 @@ class SymbolRecord:
             "parent": self.parent,
         }
 
+    @classmethod
+    def from_dict(cls, value):
+        return cls(
+            name=str(value.get("name", "")),
+            qualified_name=str(value.get("qualified_name", value.get("name", ""))),
+            kind=str(value.get("kind", "symbol")),
+            line_start=int(value.get("line_start", 1)),
+            line_end=int(value.get("line_end", value.get("line_start", 1))),
+            column=int(value.get("column", 0)),
+            parent=str(value.get("parent", "")),
+        )
+
 
 @dataclass
 class FileRecord:
     path: str
+    language: str
     fingerprint: str
     size: int
     symbols: tuple[SymbolRecord, ...] = ()
@@ -57,12 +82,35 @@ class FileRecord:
     def to_dict(self):
         return {
             "path": self.path,
-            "language": "python",
+            "language": self.language,
             "size": self.size,
             "symbols": [symbol.to_dict() for symbol in self.symbols],
             "imports": list(self.imports),
             "diagnostics": list(self.diagnostics),
         }
+
+    def to_cache_dict(self):
+        value = self.to_dict()
+        value.update(
+            {
+                "fingerprint": self.fingerprint,
+                "source_lines": list(self.source_lines),
+            }
+        )
+        return value
+
+    @classmethod
+    def from_cache_dict(cls, value):
+        return cls(
+            path=str(value["path"]),
+            language=str(value.get("language", "unknown")),
+            fingerprint=str(value.get("fingerprint", "")),
+            size=int(value.get("size", 0)),
+            symbols=tuple(SymbolRecord.from_dict(item) for item in value.get("symbols", [])),
+            imports=tuple(str(item) for item in value.get("imports", [])),
+            diagnostics=tuple(str(item) for item in value.get("diagnostics", [])),
+            source_lines=tuple(str(item) for item in value.get("source_lines", [])),
+        )
 
 
 class _SymbolVisitor(ast.NodeVisitor):
@@ -124,13 +172,48 @@ class _ImportVisitor(ast.NodeVisitor):
 
 
 class RepoIndex:
-    """In-memory AST index with per-file fingerprint reuse."""
+    """Multi-language index with per-file reuse and an atomic disk cache."""
 
     def __init__(self, root):
         self.root = Path(root).resolve()
+        self.cache_path = self.root / ".pico" / "index" / "repo-index-v2.json"
         self._records: dict[str, FileRecord] = {}
         self._signatures: dict[str, tuple[int, int]] = {}
         self._refresh_count = 0
+        self._load_cache()
+
+    def _load_cache(self):
+        try:
+            payload = json.loads(self.cache_path.read_text(encoding="utf-8"))
+            if payload.get("schema_version") != INDEX_SCHEMA_VERSION:
+                return
+            if Path(payload.get("root", "")).resolve() != self.root:
+                return
+            self._records = {
+                item["path"]: FileRecord.from_cache_dict(item)
+                for item in payload.get("records", [])
+                if isinstance(item, dict) and item.get("path")
+            }
+            self._signatures = {
+                key: (int(value[0]), int(value[1]))
+                for key, value in payload.get("signatures", {}).items()
+                if isinstance(value, list) and len(value) == 2
+            }
+        except (OSError, ValueError, TypeError, KeyError):
+            self._records = {}
+            self._signatures = {}
+
+    def _save_cache(self):
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.cache_path.with_suffix(".tmp")
+        payload = {
+            "schema_version": INDEX_SCHEMA_VERSION,
+            "root": str(self.root),
+            "signatures": {key: list(value) for key, value in sorted(self._signatures.items())},
+            "records": [self._records[key].to_cache_dict() for key in sorted(self._records)],
+        }
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        temporary.replace(self.cache_path)
 
     def _assert_inside(self, path):
         path = Path(path).resolve()
@@ -154,14 +237,15 @@ class RepoIndex:
     def _candidate_files(self, target):
         target = self._assert_inside(target)
         if target.is_file():
-            return [target] if target.suffix.lower() == ".py" else []
+            return [target] if target.suffix.lower() in LANGUAGE_BY_SUFFIX else []
         if not target.is_dir():
             raise ValueError(f"path is not a file or directory: {target}")
         return sorted(
             (
-                path
-                for path in target.rglob("*.py")
-                if path.is_file() and not self._is_ignored(path, self.root)
+                path for path in target.rglob("*")
+                if path.is_file()
+                and path.suffix.lower() in LANGUAGE_BY_SUFFIX
+                and not self._is_ignored(path, self.root)
             ),
             key=lambda path: path.relative_to(self.root).as_posix(),
         )
@@ -173,9 +257,11 @@ class RepoIndex:
 
     def _parse_file(self, path, relative_path, signature):
         size = signature[1]
+        language = LANGUAGE_BY_SUFFIX.get(path.suffix.lower(), "unknown")
         if size > MAX_INDEX_FILE_BYTES:
             return FileRecord(
                 path=relative_path,
+                language=language,
                 fingerprint=f"size:{size}",
                 size=size,
                 diagnostics=(f"file exceeds index limit ({MAX_INDEX_FILE_BYTES} bytes)",),
@@ -186,6 +272,7 @@ class RepoIndex:
         except UnicodeDecodeError as exc:
             return FileRecord(
                 path=relative_path,
+                language=language,
                 fingerprint=f"decode-error:{signature}",
                 size=size,
                 diagnostics=(f"decode error: {exc}",),
@@ -193,6 +280,7 @@ class RepoIndex:
         except OSError as exc:
             return FileRecord(
                 path=relative_path,
+                language=language,
                 fingerprint=f"read-error:{signature}",
                 size=size,
                 diagnostics=(f"read error: {exc}",),
@@ -200,6 +288,18 @@ class RepoIndex:
 
         source_lines = tuple(text.splitlines())
         fingerprint = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if language != "python":
+            symbols, imports = self._extract_structural_facts(text, language)
+            return FileRecord(
+                path=relative_path,
+                language=language,
+                fingerprint=fingerprint,
+                size=size,
+                symbols=tuple(symbols),
+                imports=tuple(sorted(imports)),
+                diagnostics=("heuristic structural index; verify with compiler or language server",),
+                source_lines=source_lines,
+            )
         try:
             tree = ast.parse(text, filename=relative_path)
         except SyntaxError as exc:
@@ -207,6 +307,7 @@ class RepoIndex:
             diagnostic = f"syntax error at {location}: {exc.msg}"
             return FileRecord(
                 path=relative_path,
+                language=language,
                 fingerprint=fingerprint,
                 size=size,
                 diagnostics=(diagnostic,),
@@ -225,6 +326,7 @@ class RepoIndex:
         )
         return FileRecord(
             path=relative_path,
+            language=language,
             fingerprint=fingerprint,
             size=size,
             symbols=symbols,
@@ -232,6 +334,53 @@ class RepoIndex:
             source_lines=source_lines,
             tree=tree,
         )
+
+    @staticmethod
+    def _extract_structural_facts(text, language):
+        patterns = {
+            "java": [
+                ("class", r"\b(?:class|interface|enum|record)\s+([A-Za-z_$][\w$]*)"),
+                ("method", r"^\s*(?:public|protected|private|static|final|abstract|synchronized|native|\s)+[\w<>,.?\[\]]+\s+([A-Za-z_$][\w$]*)\s*\("),
+            ],
+            "javascript": [
+                ("class", r"\bclass\s+([A-Za-z_$][\w$]*)"),
+                ("function", r"\bfunction\s+([A-Za-z_$][\w$]*)\s*\("),
+                ("function", r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"),
+            ],
+            "typescript": [
+                ("class", r"\b(?:class|interface|enum|type)\s+([A-Za-z_$][\w$]*)"),
+                ("function", r"\bfunction\s+([A-Za-z_$][\w$]*)\s*\("),
+                ("function", r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s*)?\([^)]*\)\s*=>"),
+            ],
+            "go": [
+                ("type", r"^\s*type\s+([A-Za-z_]\w*)\s+(?:struct|interface)\b"),
+                ("function", r"^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\("),
+            ],
+            "rust": [
+                ("type", r"^\s*(?:pub\s+)?(?:struct|enum|trait)\s+([A-Za-z_]\w*)"),
+                ("function", r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_]\w*)\s*\("),
+            ],
+        }
+        imports = set()
+        symbols = []
+        import_patterns = {
+            "java": r"^\s*import\s+(?:static\s+)?([^;]+)",
+            "javascript": r"^\s*import\s+.*?\sfrom\s+['\"]([^'\"]+)['\"]|^\s*(?:const|let|var).*?require\(['\"]([^'\"]+)['\"]\)",
+            "typescript": r"^\s*import\s+.*?\sfrom\s+['\"]([^'\"]+)['\"]|^\s*import\s+['\"]([^'\"]+)['\"]",
+            "go": r"^\s*import\s+(?:\w+\s+)?\"([^\"]+)\"",
+            "rust": r"^\s*(?:pub\s+)?use\s+([^;]+)",
+        }
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            for kind, pattern in patterns.get(language, []):
+                match = re.search(pattern, line)
+                if match:
+                    name = match.group(1)
+                    symbols.append(SymbolRecord(name, name, kind, line_number, line_number, match.start(1)))
+            import_match = re.search(import_patterns.get(language, r"$^"), line)
+            if import_match:
+                imports.add(next((group for group in import_match.groups() if group), import_match.group(0)).strip())
+        symbols.sort(key=lambda item: (item.line_start, item.column, item.name))
+        return symbols, imports
 
     def refresh(self, path="."):
         target = self._assert_inside(path if Path(path).is_absolute() else self.root / path)
@@ -266,6 +415,7 @@ class RepoIndex:
                     self._signatures.pop(relative_path, None)
 
         self._refresh_count += 1
+        self._save_cache()
         return {
             "path": "." if target == self.root else target.relative_to(self.root).as_posix(),
             "files_indexed": len(candidates),
@@ -281,7 +431,7 @@ class RepoIndex:
             relative = target.relative_to(self.root).as_posix()
             record = self._records.get(relative)
             if record is None:
-                raise ValueError("file_outline currently supports Python files only")
+                raise ValueError("file type is not supported by Repo Index")
             return [record]
         prefix = target.relative_to(self.root).as_posix()
         return [
@@ -345,6 +495,22 @@ class RepoIndex:
                         }
                     )
             if record.tree is None:
+                token_pattern = re.compile(rf"\b{re.escape(target)}\b")
+                definition_lines = {symbol.line_start for symbol in record.symbols if symbol.name == target}
+                for line_number, text in enumerate(record.source_lines, start=1):
+                    for match in token_pattern.finditer(text):
+                        if line_number in definition_lines:
+                            continue
+                        results.append(
+                            {
+                                "path": record.path,
+                                "line": line_number,
+                                "column": match.start(),
+                                "kind": "token",
+                                "scope": self._scope_for_line(record, line_number),
+                                "text": text.strip(),
+                            }
+                        )
                 continue
             for node in ast.walk(record.tree):
                 line = int(getattr(node, "lineno", 0) or 0)
