@@ -1,0 +1,31 @@
+{
+  "artifact_type": "swebench-preflight-summary-v1",
+  "dataset": "SWE-bench/SWE-bench_Lite",
+  "instance_id": "astropy__astropy-12907",
+  "base_commit": "d16bfe05a744909de4b27f5875fe0d4ed41ce607",
+  "model": "deepseek-v4-pro",
+  "runs": [
+    {
+      "environment": "Windows generation, Linux official grading",
+      "duration_seconds": 358.015,
+      "tool_steps": 13,
+      "first_edit_step": 13,
+      "patch_bytes": 12206,
+      "patch_applied": true,
+      "official_resolved": false,
+      "fail_to_pass_failures": 2,
+      "pass_to_pass_failures": 13
+    },
+    {
+      "environment": "Linux Docker generation with pinned-commit fetch",
+      "duration_seconds": 813.204,
+      "tool_steps": 24,
+      "first_edit_step": 0,
+      "patch_bytes": 0,
+      "stop_reason": "step_limit_reached",
+      "official_resolved": null,
+      "official_grading_skipped_reason": "empty patch"
+    }
+  ],
+  "claim_boundary": "Preflight evidence only. This is not a SWE-bench solve-rate measurement."
+}
