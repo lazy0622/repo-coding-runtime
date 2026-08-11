@@ -65,3 +65,43 @@ def test_swebench_adapter_does_not_count_stopped_runtime_as_success(tmp_path):
 
     assert summary["agent_success_rate"] == 0.0
     assert summary["runs"][0]["stop_reason"] == "step_limit_reached"
+
+
+def test_swebench_adapter_records_timeout_and_continues(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    git(source, "init", "-q")
+    git(source, "config", "user.email", "benchmark@example.com")
+    git(source, "config", "user.name", "Benchmark")
+    (source / "service.py").write_text("VALUE = 1\n", encoding="utf-8")
+    git(source, "add", "service.py")
+    git(source, "commit", "-qm", "base")
+    commit = git(source, "rev-parse", "HEAD").stdout.strip()
+    helper = tmp_path / "slow.py"
+    helper.write_text("import time\ntime.sleep(2)\n", encoding="utf-8")
+    instances = [
+        {
+            "instance_id": "local__timeout-1",
+            "repo_path": str(source),
+            "base_commit": commit,
+            "problem_statement": "Wait too long.",
+        },
+        {
+            "instance_id": "local__timeout-2",
+            "repo_path": str(source),
+            "base_commit": commit,
+            "problem_statement": "Wait too long again.",
+        },
+    ]
+
+    summary = SWEbenchAdapter(tmp_path / "output").run(
+        instances,
+        [sys.executable, str(helper)],
+        timeout=1,
+    )
+
+    assert len(summary["runs"]) == 2
+    assert summary["agent_success_rate"] == 0.0
+    assert all(row["exit_code"] == 124 for row in summary["runs"])
+    assert all(row["stop_reason"] == "adapter_timeout" for row in summary["runs"])
+    assert all("timed out" in row["stderr"] for row in summary["runs"])
