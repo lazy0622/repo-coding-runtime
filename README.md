@@ -38,9 +38,9 @@ repo --cwd . --task-mode inspect "定位 ExecutionPolicy 的阶段预算实现�
 | Execution Policy 消融 | 24 | 23/24 → 24/24 | 相同 fixture/脚本输出下纠正 premature final |
 | DeepSeek development | 6 | policy on 6/6；off 6/6 | 单次固定开发集可运行性，不代表通用成功率 |
 | Security quality | 3 次固定场景 | 拦截 100%；误拦截 0%；泄漏 0% | 当前本地工具与工件边界，不等于完整渗透测试 |
-| SWE-bench Lite Mini | 10 个预先固定实例 | 待官方 Docker Harness 裁决 | 真实仓库 issue 解决能力 |
+| SWE-bench Lite preflight | 1 个固定真实实例 | 官方 0/1；另一次空补丁 | 链路已打通，但尚不能声称真实 issue 解决率 |
 
-完整口径、失败记录与数据来源见 [`benchmarks/reporuntimebench/results/v3-evaluation-summary.md`](benchmarks/reporuntimebench/results/v3-evaluation-summary.md)。固定 fixture 结果和真实模型结果严格分层，不把本地回归冒充 SWE-bench solve rate。
+完整口径、失败记录与数据来源见 [`benchmarks/reporuntimebench/results/v3-evaluation-summary.md`](benchmarks/reporuntimebench/results/v3-evaluation-summary.md) 和 [`SWE-bench Lite preflight`](benchmarks/swebench/results/preflight-2026-08-11.md)。固定 fixture 结果和真实模型结果严格分层，不把本地回归冒充 SWE-bench solve rate。
 
 ## 适合做什么
 
