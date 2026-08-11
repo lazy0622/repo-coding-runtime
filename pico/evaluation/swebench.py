@@ -37,16 +37,23 @@ def load_instances(path):
 
 
 def _run(command, cwd, timeout=300, env=None):
-    result = subprocess.run(
-        [str(item) for item in command],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-        env=env,
-    )
-    return result
+    argv = [str(item) for item in command]
+    try:
+        return subprocess.run(
+            argv,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        timeout_message = f"command timed out after {timeout} seconds"
+        stderr = f"{stderr.rstrip()}\n{timeout_message}" if stderr.strip() else timeout_message
+        return subprocess.CompletedProcess(argv, 124, stdout=stdout, stderr=stderr)
 
 
 class SWEbenchAdapter:
@@ -185,6 +192,9 @@ class SWEbenchAdapter:
         else:
             execution_policy = {}
         agent_completed = result.returncode == 0 and runtime_status not in {"stopped", "failed", "unreadable_report"}
+        if result.returncode == 124 and not stop_reason:
+            stop_reason = "adapter_timeout"
+            runtime_status = "timed_out"
         run_record = {
             "instance_id": str(instance["instance_id"]),
             "command": command,
