@@ -61,9 +61,9 @@
       "allowed_tools": ["patch_file"],
       "expected_artifact": "repair after verifier feedback",
       "artifact_path": "app/status.py",
-      "verify_command": "python -c \"from app.status import STATUS; assert STATUS=='passed'\"",
+      "verify_command": "python -B -c \"from app.status import STATUS; assert STATUS=='passed'\"",
       "max_verification_attempts": 2,
-      "verifier": "python -c \"from app.status import STATUS; assert STATUS=='passed'\"",
+      "verifier": "python -B -c \"from app.status import STATUS; assert STATUS=='passed'\"",
       "category": "verification-repair",
       "scripted_outputs": ["<tool name=\"patch_file\" path=\"app/status.py\"><old_text>STATUS = \"pending\"</old_text><new_text>STATUS = \"almost\"</new_text></tool>", "<final>Updated.</final>", "<tool name=\"patch_file\" path=\"app/status.py\"><old_text>STATUS = \"almost\"</old_text><new_text>STATUS = \"passed\"</new_text></tool>", "<final>Repaired.</final>"]
     },
@@ -221,9 +221,9 @@
       "allowed_tools": ["patch_file"],
       "expected_artifact": "second repair flow",
       "artifact_path": "app/status.py",
-      "verify_command": "python -c \"from app.status import STATUS; assert STATUS=='healthy'\"",
+      "verify_command": "python -B -c \"from app.status import STATUS; assert STATUS=='healthy'\"",
       "max_verification_attempts": 2,
-      "verifier": "python -c \"from app.status import STATUS; assert STATUS=='healthy'\"",
+      "verifier": "python -B -c \"from app.status import STATUS; assert STATUS=='healthy'\"",
       "category": "verification-repair",
       "scripted_outputs": ["<tool name=\"patch_file\" path=\"app/status.py\"><old_text>STATUS = \"pending\"</old_text><new_text>STATUS = \"unhealthy\"</new_text></tool>", "<final>Done.</final>", "<tool name=\"patch_file\" path=\"app/status.py\"><old_text>STATUS = \"unhealthy\"</old_text><new_text>STATUS = \"healthy\"</new_text></tool>", "<final>Repaired.</final>"]
     },
