@@ -77,28 +77,40 @@ class SWEbenchAdapter:
             if probe.returncode != 0 or probe.stdout.strip() != "true":
                 shutil.rmtree(mirror)
         if not mirror.exists():
+            init = _run(["git", "init", "--bare", "--quiet", str(mirror)], self.cache_dir, timeout=60)
+            if init.returncode != 0:
+                raise SWEbenchAdapterError(init.stderr.strip() or "git bare cache init failed")
+            remote = _run(
+                ["git", "remote", "add", "origin", f"https://github.com/{instance['repo']}.git"],
+                mirror,
+                timeout=30,
+            )
+            if remote.returncode != 0:
+                raise SWEbenchAdapterError(remote.stderr.strip() or "git cache remote setup failed")
+        commit = str(instance["base_commit"])
+        present = _run(["git", "cat-file", "-e", f"{commit}^{{commit}}"], mirror, timeout=30)
+        if present.returncode != 0:
             errors = []
             for _ in range(3):
-                if mirror.exists():
-                    shutil.rmtree(mirror)
-                clone = _run(
+                fetch = _run(
                     [
                         "git",
                         "-c",
                         "http.version=HTTP/1.1",
-                        "clone",
-                        "--mirror",
-                        "--filter=blob:none",
+                        "fetch",
                         "--quiet",
-                        f"https://github.com/{instance['repo']}.git",
-                        str(mirror),
+                        "--no-tags",
+                        "--depth=1",
+                        "--filter=blob:none",
+                        "origin",
+                        commit,
                     ],
-                    self.cache_dir,
-                    timeout=900,
+                    mirror,
+                    timeout=300,
                 )
-                if clone.returncode == 0:
+                if fetch.returncode == 0:
                     break
-                errors.append(clone.stderr.strip() or "git mirror clone failed")
+                errors.append(fetch.stderr.strip() or "git pinned commit fetch failed")
             else:
                 raise SWEbenchAdapterError("; ".join(errors))
         return str(mirror)
