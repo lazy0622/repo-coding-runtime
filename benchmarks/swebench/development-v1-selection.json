@@ -1,0 +1,18 @@
+{
+  "dataset": "SWE-bench/SWE-bench_Lite",
+  "split": "test",
+  "selection_policy": "five instances fixed before the experiment, alternating two repositories from the pre-registered mini-v1 pool; no outcome-based filtering",
+  "repetitions": 3,
+  "generation_budget": {
+    "timeout_seconds": 900,
+    "max_agent_steps": 24,
+    "model": "deepseek-v4-pro"
+  },
+  "instance_ids": [
+    "astropy__astropy-12907",
+    "django__django-10914",
+    "astropy__astropy-14182",
+    "django__django-10924",
+    "astropy__astropy-14365"
+  ]
+}

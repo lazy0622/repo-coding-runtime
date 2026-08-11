@@ -4,6 +4,44 @@ Repo Coding Runtime 是一个面向代码仓库的本地 Coding Agent Runtime。
 
 它更像一个能在仓库里持续工作的命令行 Coding Agent，不是纯聊天窗口。你可以拿它做代码排查、测试修复、仓库分析，或者让它在当前项目里执行一次性的工程任务。
 
+```mermaid
+flowchart LR
+    U["User task"] --> S["Supervisor / Execution Policy"]
+    S --> I["Persistent Repo Index"]
+    S --> A["Agent Loop"]
+    A --> G["Tool Gateway + Approval + Safety"]
+    G --> T["Read / Patch / Shell / MCP"]
+    T --> V["Tests and hidden verifier"]
+    V -->|pass| R["Checkpoint + Trace + Report"]
+    V -->|fail within budget| A
+    S --> M["Memory + Context Compression"]
+    S --> Q["TaskGraph + isolated Sub-Agents"]
+```
+
+## 30 秒体验
+
+```powershell
+git clone https://github.com/lazy0622/repo-coding-runtime.git
+cd repo-coding-runtime
+pip install -e .
+Copy-Item .env.example .env   # 填入 PICO_DEEPSEEK_API_KEY
+repo --cwd . --task-mode inspect "定位 ExecutionPolicy 的阶段预算实现并给出证据"
+```
+
+一次修改任务会形成可审计闭环：Repo Index 定位代码 → 受控工具修改 → 自动验证 → 失败后限次修复或回滚 → 保存 `.pico/runs/<run_id>/report.json`。
+
+## Benchmark 快照
+
+| 评测层 | 固定任务 | 当前结果 | 能证明什么 |
+| --- | ---: | ---: | --- |
+| RepoRuntimeBench | 24 | 24/24 | Harness、工具、安全、恢复和隐藏验证合同 |
+| Execution Policy 消融 | 24 | 23/24 → 24/24 | 相同 fixture/脚本输出下纠正 premature final |
+| DeepSeek development | 6 | policy on 6/6；off 6/6 | 单次固定开发集可运行性，不代表通用成功率 |
+| Security quality | 3 次固定场景 | 拦截 100%；误拦截 0%；泄漏 0% | 当前本地工具与工件边界，不等于完整渗透测试 |
+| SWE-bench Lite Mini | 10 个预先固定实例 | 待官方 Docker Harness 裁决 | 真实仓库 issue 解决能力 |
+
+完整口径、失败记录与数据来源见 [`benchmarks/reporuntimebench/results/v3-evaluation-summary.md`](benchmarks/reporuntimebench/results/v3-evaluation-summary.md)。固定 fixture 结果和真实模型结果严格分层，不把本地回归冒充 SWE-bench solve rate。
+
 ## 适合做什么
 
 - 在本地仓库里排查测试失败

@@ -50,10 +50,12 @@ def _run(command, cwd, timeout=300, env=None):
 
 
 class SWEbenchAdapter:
-    def __init__(self, output_dir, model_name="repo-coding-runtime"):
+    def __init__(self, output_dir, model_name="repo-coding-runtime", cache_dir=None):
         self.output_dir = Path(output_dir).resolve()
         self.model_name = str(model_name)
+        self.cache_dir = Path(cache_dir or self.output_dir / "repo-cache").resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _source(self, instance):
         if instance.get("repo_path"):
@@ -61,7 +63,38 @@ class SWEbenchAdapter:
             if not source.exists():
                 raise SWEbenchAdapterError(f"repo_path does not exist: {source}")
             return str(source)
-        return f"https://github.com/{instance['repo']}.git"
+        cache_name = str(instance["repo"]).replace("/", "__") + ".git"
+        mirror = self.cache_dir / cache_name
+        if mirror.exists():
+            probe = _run(["git", "rev-parse", "--is-bare-repository"], mirror, timeout=30)
+            if probe.returncode != 0 or probe.stdout.strip() != "true":
+                shutil.rmtree(mirror)
+        if not mirror.exists():
+            errors = []
+            for _ in range(3):
+                if mirror.exists():
+                    shutil.rmtree(mirror)
+                clone = _run(
+                    [
+                        "git",
+                        "-c",
+                        "http.version=HTTP/1.1",
+                        "clone",
+                        "--mirror",
+                        "--filter=blob:none",
+                        "--quiet",
+                        f"https://github.com/{instance['repo']}.git",
+                        str(mirror),
+                    ],
+                    self.cache_dir,
+                    timeout=900,
+                )
+                if clone.returncode == 0:
+                    break
+                errors.append(clone.stderr.strip() or "git mirror clone failed")
+            else:
+                raise SWEbenchAdapterError("; ".join(errors))
+        return str(mirror)
 
     def prepare(self, instance):
         instance_dir = self.output_dir / "instances" / str(instance["instance_id"])
@@ -69,12 +102,45 @@ class SWEbenchAdapter:
         if instance_dir.exists():
             shutil.rmtree(instance_dir)
         instance_dir.mkdir(parents=True)
-        clone = _run(["git", "clone", "--quiet", "--no-hardlinks", self._source(instance), str(workspace)], self.output_dir)
-        if clone.returncode != 0:
-            raise SWEbenchAdapterError(clone.stderr.strip() or "git clone failed")
-        checkout = _run(["git", "checkout", "--quiet", str(instance["base_commit"])], workspace)
-        if checkout.returncode != 0:
-            raise SWEbenchAdapterError(checkout.stderr.strip() or "git checkout failed")
+        source = self._source(instance)
+        if instance.get("repo_path"):
+            clone = _run(
+                ["git", "clone", "--quiet", "--no-hardlinks", source, str(workspace)],
+                self.output_dir,
+            )
+            if clone.returncode != 0:
+                raise SWEbenchAdapterError(clone.stderr.strip() or "git clone failed")
+            checkout = _run(["git", "checkout", "--quiet", str(instance["base_commit"])], workspace)
+            if checkout.returncode != 0:
+                raise SWEbenchAdapterError(checkout.stderr.strip() or "git checkout failed")
+        else:
+            mirror = Path(source)
+            _run(["git", "worktree", "prune"], mirror, timeout=60)
+            errors = []
+            for _ in range(3):
+                if workspace.exists():
+                    shutil.rmtree(workspace)
+                checkout = _run(
+                    [
+                        "git",
+                        "-c",
+                        "http.version=HTTP/1.1",
+                        "worktree",
+                        "add",
+                        "--detach",
+                        "--force",
+                        str(workspace),
+                        str(instance["base_commit"]),
+                    ],
+                    mirror,
+                    timeout=900,
+                )
+                if checkout.returncode == 0:
+                    break
+                errors.append(checkout.stderr.strip() or "git worktree checkout failed")
+                _run(["git", "worktree", "prune"], mirror, timeout=60)
+            else:
+                raise SWEbenchAdapterError("; ".join(errors))
         prompt_path = instance_dir / "problem_statement.md"
         prompt_path.write_text(str(instance["problem_statement"]), encoding="utf-8")
         return instance_dir, workspace, prompt_path
@@ -112,8 +178,12 @@ class SWEbenchAdapter:
                 report = json.loads(runtime_reports[0].read_text(encoding="utf-8"))
                 runtime_status = str(report.get("status", ""))
                 stop_reason = str(report.get("stop_reason", ""))
+                execution_policy = dict(report.get("execution_policy", {}) or {})
             except (OSError, ValueError, TypeError):
                 runtime_status = "unreadable_report"
+                execution_policy = {}
+        else:
+            execution_policy = {}
         agent_completed = result.returncode == 0 and runtime_status not in {"stopped", "failed", "unreadable_report"}
         run_record = {
             "instance_id": str(instance["instance_id"]),
@@ -124,6 +194,8 @@ class SWEbenchAdapter:
             "stop_reason": stop_reason,
             "duration_seconds": round(duration, 3),
             "patch_bytes": len(diff.stdout.encode("utf-8")),
+            "tool_steps": int(report.get("tool_steps", 0)) if runtime_reports and runtime_status != "unreadable_report" else 0,
+            "first_edit_step": int(execution_policy.get("first_edit_step", 0) or 0),
             "stdout": result.stdout[-4000:],
             "stderr": result.stderr[-4000:],
             "workspace": str(workspace),
