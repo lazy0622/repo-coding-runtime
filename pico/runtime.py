@@ -21,10 +21,12 @@ from .events import build_run_event
 from .execution_policy import EDIT_TOOLS, ExecutionPolicy
 from .checkpoint import CHECKPOINT_NONE_STATUS
 from .prompt_prefix import build_prompt_prefix, tool_signature
+from .providers.tool_calls import provider_tool_definitions
 from .plan import PlanState
 from .patching import PatchJournal
 from .repo_index import RepoIndex
 from .run_store import RunStore
+from .sandbox import SandboxConfig, build_execution_backend
 from .security import REDACTED_VALUE
 from .session_store import SessionStore
 from .skills import SkillRegistry
@@ -90,10 +92,13 @@ class Pico:
         max_verification_attempts=2,
         execution_policy=None,
         task_mode="auto",
+        sandbox_config=None,
     ):
         self.model_client = model_client
         self.workspace = workspace
         self.root = Path(workspace.repo_root)
+        self.sandbox_config = SandboxConfig.from_value(sandbox_config)
+        self.execution_backend = build_execution_backend(self.root, self.sandbox_config)
         self.session_store = session_store
         self.approval_policy = approval_policy
         self.max_steps = max_steps
@@ -159,6 +164,7 @@ class Pico:
         self.current_run_dir = None
         self.last_prompt_metadata = {}
         self.last_completion_metadata = {}
+        self._native_tool_context = None
         self.last_durable_promotions = []
         self.last_durable_rejections = []
         self.last_durable_superseded = []
@@ -341,7 +347,44 @@ class Pico:
         return tool_signature(self.tools)
 
     def build_prefix(self):
-        return build_prompt_prefix(workspace=self.workspace, tools=self.tools)
+        return build_prompt_prefix(
+            workspace=self.workspace,
+            tools=self.tools,
+            native_tool_calling=bool(getattr(self.model_client, "supports_native_tool_calling", False)),
+        )
+
+    def native_tool_definitions(self):
+        """Return provider-native tools, or ``None`` for text/XML clients."""
+
+        if not getattr(self.model_client, "supports_native_tool_calling", False):
+            return None
+        protocol = str(getattr(self.model_client, "native_tool_protocol", "") or "")
+        if not protocol:
+            return None
+        return provider_tool_definitions(self.tools, protocol)
+
+    def native_tool_result_context(self):
+        """Return the previous native call/result for provider continuation."""
+
+        return dict(self._native_tool_context or {}) or None
+
+    def remember_native_tool_result(self, prompt, payload, result):
+        protocol = str((payload or {}).get("_tool_protocol", ""))
+        call_id = str((payload or {}).get("_tool_call_id", ""))
+        if not protocol or not call_id:
+            self._native_tool_context = None
+            return
+        self._native_tool_context = {
+            "protocol": protocol,
+            "call_id": call_id,
+            "name": str((payload or {}).get("name", "")),
+            "args": dict((payload or {}).get("args", {}) or {}),
+            "result": str(result or ""),
+            "assistant_prompt": str(prompt or ""),
+        }
+
+    def clear_native_tool_result_context(self):
+        self._native_tool_context = None
 
     def _apply_prefix_state(self, prefix_state):
         self.prefix_state = prefix_state
@@ -540,6 +583,7 @@ class Pico:
             self.verify_command,
             timeout=self.verify_timeout,
             env=self.shell_env(),
+            execution_backend=self.execution_backend,
         )
         self.last_verification = self.redact_artifact(result.to_dict())
         if task_state is not None:
@@ -754,6 +798,7 @@ class Pico:
             "plan": self.plan_summary(),
             "verification": dict(self.last_verification),
             "execution_policy": self.execution_policy.summary(task_state),
+            "execution_backend": self.execution_backend.report(),
             "redacted_env": self.detected_secret_env_summary(),
             "skills": {
                 "loaded": list(self.skill_registry.names()),
@@ -798,6 +843,7 @@ class Pico:
             enable_subagents=self.enable_subagents,
             repo_index=self.repo_index,
             patch_journal=self.patch_journal,
+            execution_backend=self.execution_backend,
             spawn_subagents=self.spawn_subagents,
             spawn_coding_workflow=self.spawn_coding_workflow,
         )
@@ -825,6 +871,7 @@ class Pico:
             verify_command="",
             verify_timeout=self.verify_timeout,
             max_verification_attempts=self.max_verification_attempts,
+            sandbox_config=self.sandbox_config,
         )
         # 委派的目标是“调查”，不是“放权执行”。
         # 子 agent 以只读方式运行、步数更少，最后只把结论文本返回给父 agent。
@@ -924,6 +971,20 @@ class Pico:
         它位于 `model_client.complete()` 之后、`run_tool()` 之前，是模型输出
         进入平台控制流的第一道结构化关口。
         """
+        native_tool_calls = tuple(getattr(raw, "tool_calls", ()) or ())
+        if native_tool_calls:
+            if len(native_tool_calls) != 1:
+                return "retry", Pico.retry_notice(
+                    "native provider returned multiple tool calls; issue one tool call per turn"
+                )
+            call = native_tool_calls[0]
+            payload = call.to_runtime_payload()
+            if getattr(call, "error", ""):
+                return "retry", Pico.retry_notice(str(call.error))
+            if not str(payload.get("name", "")).strip():
+                return "retry", Pico.retry_notice("native tool call is missing a tool name")
+            return "tool", payload
+
         raw = str(raw)
         # 这里支持两种工具格式：
         # 1. <tool>...</tool> 里包 JSON，适合简短调用
@@ -1077,6 +1138,9 @@ class Pico:
             close = getattr(provider, "close", None)
             if callable(close):
                 close()
+        close_backend = getattr(self.execution_backend, "close", None)
+        if callable(close_backend):
+            close_backend()
 
     def path(self, raw_path):
         path = Path(raw_path)

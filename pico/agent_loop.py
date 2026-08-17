@@ -62,6 +62,7 @@ class AgentLoop:
     def run(self, user_message):
         agent = self.agent
         run_started_at = time.monotonic()
+        agent.clear_native_tool_result_context()
         agent.memory.set_task_summary(user_message)
         agent.record({"role": "user", "content": user_message, "created_at": now()})
 
@@ -181,12 +182,17 @@ class AgentLoop:
                 prompt_cache_retention = "in_memory"
             model_started_at = time.monotonic()
             try:
-                raw = agent.model_client.complete(
-                    prompt,
-                    agent.max_new_tokens,
-                    prompt_cache_key=prompt_cache_key,
-                    prompt_cache_retention=prompt_cache_retention,
-                )
+                completion_kwargs = {
+                    "prompt_cache_key": prompt_cache_key,
+                    "prompt_cache_retention": prompt_cache_retention,
+                }
+                native_tools = agent.native_tool_definitions()
+                if native_tools:
+                    completion_kwargs["tools"] = native_tools
+                    native_tool_result = agent.native_tool_result_context()
+                    if native_tool_result:
+                        completion_kwargs["native_tool_result"] = native_tool_result
+                raw = agent.model_client.complete(prompt, agent.max_new_tokens, **completion_kwargs)
             except Exception as exc:
                 previous_phase = task_state.phase
                 agent.fail_plan(str(exc))
@@ -218,6 +224,8 @@ class AgentLoop:
                 {
                     "kind": kind,
                     "completion_metadata": completion_metadata,
+                    "tool_call_id": payload.get("_tool_call_id", "") if isinstance(payload, dict) else "",
+                    "tool_protocol": payload.get("_tool_protocol", "") if isinstance(payload, dict) else "",
                     "duration_ms": int((time.monotonic() - model_started_at) * 1000),
                 },
             )
@@ -263,10 +271,15 @@ class AgentLoop:
                         "role": "tool",
                         "name": name,
                         "args": args,
+                        "tool_call_id": payload.get("_tool_call_id", ""),
                         "content": result,
                         "created_at": now(),
                     }
                 )
+                if payload.get("_tool_protocol") and payload.get("_tool_call_id"):
+                    agent.remember_native_tool_result(prompt, payload, result)
+                else:
+                    agent.clear_native_tool_result_context()
                 agent.run_store.write_task_state(task_state)
                 # Read-only tools are already represented in session history;
                 # create a durable checkpoint only after risky or workspace-

@@ -56,6 +56,93 @@ def _run(command, cwd, timeout=300, env=None):
         return subprocess.CompletedProcess(argv, 124, stdout=stdout, stderr=stderr)
 
 
+def _latest_runtime_artifacts(workspace):
+    """Load the newest runtime report and its trace without inventing data."""
+
+    runs_root = Path(workspace) / ".pico" / "runs"
+    if not runs_root.is_dir():
+        return {}, None, []
+    report_paths = sorted(
+        runs_root.glob("*/report.json"),
+        key=lambda path: path.stat().st_mtime_ns,
+        reverse=True,
+    )
+    if not report_paths:
+        return {}, None, []
+    report_path = report_paths[0]
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {"status": "unreadable_report"}, report_path, []
+    trace_path = report_path.parent / "trace.jsonl"
+    events = []
+    if trace_path.is_file():
+        try:
+            for line in trace_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    value = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(value, dict):
+                    events.append(value)
+        except OSError:
+            pass
+    return report if isinstance(report, dict) else {}, report_path, events
+
+
+def _sum_observed(values):
+    observed = [value for value in values if isinstance(value, (int, float)) and not isinstance(value, bool)]
+    return sum(observed) if observed else None
+
+
+def _runtime_metrics(report, events):
+    policy = dict(report.get("execution_policy", {}) or {})
+    verification = dict(report.get("verification", {}) or {})
+    prompt_metadata = dict(report.get("prompt_metadata", {}) or {})
+    completion_rows = [
+        dict(event.get("completion_metadata", {}) or {})
+        for event in events
+        if isinstance(event, dict) and event.get("event") == "model_parsed"
+    ]
+    usage = {}
+    for name in ("input_tokens", "output_tokens", "total_tokens", "cached_tokens"):
+        values = [row.get(name) for row in completion_rows]
+        usage[name] = _sum_observed(values)
+    if not completion_rows:
+        # Some external providers only expose the last completion in the
+        # report. Preserve it as observed data and label the scope; never
+        # estimate an aggregate from prompt length.
+        usage = {
+            name: prompt_metadata.get(name)
+            if isinstance(prompt_metadata.get(name), (int, float))
+            else None
+            for name in ("input_tokens", "output_tokens", "total_tokens", "cached_tokens")
+        }
+        usage_scope = "last_completion" if any(value is not None for value in usage.values()) else "none"
+    else:
+        usage_scope = "trace_aggregated"
+    backend = dict(report.get("execution_backend", {}) or {})
+    final_verifier = policy.get("final_verifier_passed")
+    if final_verifier is None and "passed" in verification:
+        final_verifier = bool(verification.get("passed"))
+    return {
+        "tool_steps": int(report.get("tool_steps", 0) or 0),
+        "first_edit_step": int(policy.get("first_edit_step", 0) or 0),
+        "discovery_tool_steps": int(policy.get("discovery_tool_steps", 0) or 0),
+        "verification_tool_steps": int(policy.get("verification_tool_steps", 0) or 0),
+        "verification_repair_count": int(policy.get("verification_repair_count", 0) or 0),
+        "repeated_tool_rejections": int(policy.get("repeated_tool_rejections", 0) or 0),
+        "final_verifier_passed": final_verifier,
+        "sandbox_mode": str(backend.get("mode", backend.get("sandbox_mode", "host")) or "host"),
+        "execution_backend": str(backend.get("execution_backend", "") or ""),
+        "execution_policy_enabled": policy.get("enabled"),
+        "usage_scope": usage_scope,
+        **usage,
+    }
+
+
 class SWEbenchAdapter:
     def __init__(self, output_dir, model_name="repo-coding-runtime", cache_dir=None):
         self.output_dir = Path(output_dir).resolve()
@@ -185,24 +272,10 @@ class SWEbenchAdapter:
             raise SWEbenchAdapterError(diff.stderr.strip() or "git diff failed")
         patch_path = instance_dir / "model.patch"
         patch_path.write_text(diff.stdout, encoding="utf-8")
-        runtime_reports = sorted(
-            (workspace / ".pico" / "runs").glob("*/report.json"),
-            key=lambda path: path.stat().st_mtime_ns,
-            reverse=True,
-        ) if (workspace / ".pico" / "runs").is_dir() else []
-        runtime_status = ""
-        stop_reason = ""
-        if runtime_reports:
-            try:
-                report = json.loads(runtime_reports[0].read_text(encoding="utf-8"))
-                runtime_status = str(report.get("status", ""))
-                stop_reason = str(report.get("stop_reason", ""))
-                execution_policy = dict(report.get("execution_policy", {}) or {})
-            except (OSError, ValueError, TypeError):
-                runtime_status = "unreadable_report"
-                execution_policy = {}
-        else:
-            execution_policy = {}
+        report, report_path, trace_events = _latest_runtime_artifacts(workspace)
+        runtime_status = str(report.get("status", ""))
+        stop_reason = str(report.get("stop_reason", ""))
+        runtime_metrics = _runtime_metrics(report, trace_events)
         agent_completed = result.returncode == 0 and runtime_status not in {"stopped", "failed", "unreadable_report"}
         if result.returncode == 124 and not stop_reason:
             stop_reason = "adapter_timeout"
@@ -216,12 +289,13 @@ class SWEbenchAdapter:
             "stop_reason": stop_reason,
             "duration_seconds": round(duration, 3),
             "patch_bytes": len(diff.stdout.encode("utf-8")),
-            "tool_steps": int(report.get("tool_steps", 0)) if runtime_reports and runtime_status != "unreadable_report" else 0,
-            "first_edit_step": int(execution_policy.get("first_edit_step", 0) or 0),
+            **runtime_metrics,
             "stdout": result.stdout[-4000:],
             "stderr": result.stderr[-4000:],
             "workspace": str(workspace),
             "patch_path": str(patch_path),
+            "report_path": str(report_path) if report_path else "",
+            "trace_path": str(report_path.parent / "trace.jsonl") if report_path else "",
         }
         (instance_dir / "run.json").write_text(json.dumps(run_record, ensure_ascii=False, indent=2), encoding="utf-8")
         prediction = {
@@ -235,7 +309,54 @@ class SWEbenchAdapter:
         predictions = []
         runs = []
         for instance in instances:
-            prediction, record = self.run_instance(instance, agent_command, timeout=timeout)
+            try:
+                prediction, record = self.run_instance(instance, agent_command, timeout=timeout)
+            except Exception as exc:
+                instance_id = str(instance["instance_id"])
+                instance_dir = self.output_dir / "instances" / instance_id
+                instance_dir.mkdir(parents=True, exist_ok=True)
+                record = {
+                    "instance_id": instance_id,
+                    "command": [],
+                    "exit_code": None,
+                    "agent_completed": False,
+                    "runtime_status": "adapter_failed",
+                    "stop_reason": "adapter_error",
+                    "duration_seconds": None,
+                    "patch_bytes": 0,
+                    "tool_steps": 0,
+                    "first_edit_step": 0,
+                    "discovery_tool_steps": 0,
+                    "verification_tool_steps": 0,
+                    "verification_repair_count": 0,
+                    "repeated_tool_rejections": 0,
+                    "final_verifier_passed": None,
+                    "sandbox_mode": None,
+                    "execution_backend": None,
+                    "execution_policy_enabled": None,
+                    "input_tokens": None,
+                    "output_tokens": None,
+                    "total_tokens": None,
+                    "cached_tokens": None,
+                    "usage_scope": "none",
+                    "error_type": exc.__class__.__name__,
+                    "error": str(exc),
+                    "stdout": "",
+                    "stderr": "",
+                    "workspace": str(instance_dir / "repo"),
+                    "patch_path": str(instance_dir / "model.patch"),
+                    "report_path": "",
+                    "trace_path": "",
+                }
+                (instance_dir / "model.patch").write_text("", encoding="utf-8")
+                (instance_dir / "run.json").write_text(
+                    json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                prediction = {
+                    "instance_id": instance_id,
+                    "model_patch": "",
+                    "model_name_or_path": self.model_name,
+                }
             predictions.append(prediction)
             runs.append(record)
         predictions_path = self.output_dir / "predictions.jsonl"
@@ -248,8 +369,18 @@ class SWEbenchAdapter:
             "instance_count": len(instances),
             "agent_success_rate": sum(row["agent_completed"] for row in runs) / len(runs) if runs else 0.0,
             "non_empty_patch_rate": sum(row["patch_bytes"] > 0 for row in runs) / len(runs) if runs else 0.0,
+            "failure_count": sum(
+                not row["agent_completed"] or row["patch_bytes"] == 0 for row in runs
+            ),
             "predictions_path": str(predictions_path),
             "runs": runs,
+        }
+        summary["generation_metrics"] = {
+            "task_runs": len(runs),
+            "agent_completion_rate": summary["agent_success_rate"],
+            "non_empty_patch_rate": summary["non_empty_patch_rate"],
+            "failure_count": summary["failure_count"],
+            "scope": "agent generation and patch capture; not official SWE-bench grading",
         }
         (self.output_dir / "generation-summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         return summary

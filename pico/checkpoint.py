@@ -33,6 +33,7 @@ RUNTIME_IDENTITY_KEYS = (
     "workspace_fingerprint",
     "tool_signature",
     "skill_signature",
+    "sandbox_config",
 )
 
 
@@ -58,6 +59,9 @@ def current_runtime_identity(agent):
         "workspace_fingerprint": getattr(getattr(agent, "prefix_state", None), "workspace_fingerprint", agent.workspace.fingerprint()),
         "tool_signature": agent.tool_signature(),
         "skill_signature": agent.skill_registry.signature(),
+        "sandbox_config": dict(getattr(agent, "sandbox_config", {}).to_dict())
+        if hasattr(getattr(agent, "sandbox_config", None), "to_dict")
+        else {},
     }
 
 

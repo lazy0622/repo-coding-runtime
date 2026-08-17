@@ -227,9 +227,22 @@ class ToolGateway:
             workspace_changed = bool(affected_paths)
             tool_status = "ok"
             tool_error_code = ""
+            backend_metadata = {}
             if name == "run_shell":
                 match = re.search(r"exit_code:\s*(-?\d+)", content)
                 exit_code = int(match.group(1)) if match else 0
+                for field_name, pattern in (
+                    ("execution_backend", r"execution_backend:\s*([^\n]+)"),
+                    ("sandbox_mode", r"sandbox_mode:\s*([^\n]+)"),
+                    ("resource_limit_reason", r"resource_limit_reason:\s*([^\n]+)"),
+                ):
+                    field_match = re.search(pattern, content)
+                    if field_match:
+                        backend_metadata[field_name] = field_match.group(1).strip()
+                for field_name in ("timeout_killed", "oom_killed"):
+                    field_match = re.search(rf"{field_name}:\s*(true|false)", content, re.I)
+                    if field_match:
+                        backend_metadata[field_name] = field_match.group(1).lower() == "true"
                 if exit_code != 0 and workspace_changed:
                     tool_status = "partial_success"
                     tool_error_code = "tool_partial_success"
@@ -269,6 +282,7 @@ class ToolGateway:
                 workspace_fingerprint=agent.workspace.fingerprint(),
                 diff_summary=diff_summary,
             )
+            metadata.update(backend_metadata)
             metadata["duration_ms"] = int((time.monotonic() - started_at) * 1000)
             agent.record_process_note_for_tool(name, metadata)
             return self._finish(name, args, ToolExecutionResult(content=content, metadata=metadata))
