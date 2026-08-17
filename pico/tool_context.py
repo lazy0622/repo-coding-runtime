@@ -16,6 +16,7 @@ class ToolContext:
     enable_delegate: bool = False
     repo_index: object | None = None
     patch_journal: object | None = None
+    execution_backend: object | None = None
     enable_subagents: bool = False
     spawn_subagents: Callable[[dict], str] | None = None
     spawn_coding_workflow: Callable[[dict], str] | None = None

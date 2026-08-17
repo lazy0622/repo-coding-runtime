@@ -204,6 +204,7 @@ class CodingWorkflowManager:
             verify_command,
             timeout=int(args.get("verify_timeout", 60)),
             env=self.agent.shell_env(),
+            execution_backend=self.agent.execution_backend,
         )
         workflow["verification"] = verification.to_dict()
         self._emit("verification_finished", {"workflow_id": workflow_id, **verification.to_dict()})

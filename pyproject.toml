@@ -24,3 +24,6 @@ include = ["pico*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "docker: requires an explicitly enabled local Docker integration environment",
+]

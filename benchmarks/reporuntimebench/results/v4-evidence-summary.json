@@ -1,0 +1,178 @@
+{
+  "artifact_type": "repo-coding-runtime-v4-evidence",
+  "benchmark_evidence": {
+    "policy_ablation": {
+      "metrics": {
+        "delta": {
+          "average_first_edit_step": -0.033333333333333215,
+          "pass_rate": 0.04166666666666663,
+          "passed": 1,
+          "patch_generation_rate": 0.04761904761904767,
+          "read_only_tool_ratio": -0.009756097560975618,
+          "repeated_tool_rejections": 0,
+          "supervisor_intervention_rate": 0.08333333333333333,
+          "verifier_pass_rate": 0.04166666666666663
+        },
+        "policy_off": {
+          "average_first_edit_step": 1.7,
+          "pass_rate": 0.9583333333333334,
+          "passed": 23,
+          "patch_generation_rate": 0.9523809523809523,
+          "read_only_tool_ratio": 0.4,
+          "repeated_tool_rejections": 1,
+          "supervisor_intervention_rate": 0.0,
+          "total_tasks": 24,
+          "verifier_pass_rate": 0.9583333333333334
+        },
+        "policy_on": {
+          "average_first_edit_step": 1.6666666666666667,
+          "pass_rate": 1.0,
+          "passed": 24,
+          "patch_generation_rate": 1.0,
+          "read_only_tool_ratio": 0.3902439024390244,
+          "repeated_tool_rejections": 1,
+          "supervisor_intervention_rate": 0.08333333333333333,
+          "total_tasks": 24,
+          "verifier_pass_rate": 1.0
+        },
+        "scope": "deterministic harness ablation, not live-model quality"
+      },
+      "source": "artifacts/reporuntimebench-ablation-v1/ablation.json",
+      "status": "available"
+    },
+    "reporuntimebench": {
+      "metrics": {
+        "average_first_edit_step": 1.6666666666666667,
+        "failed": 0,
+        "pass_rate": 1.0,
+        "passed": 24,
+        "patch_generation_rate": 1.0,
+        "read_only_tool_ratio": 0.3902439024390244,
+        "tasks": 24,
+        "verifier_pass_rate": 1.0
+      },
+      "source": "artifacts/reporuntimebench-v1/benchmark.json",
+      "status": "available"
+    },
+    "security_quality": {
+      "metrics": {
+        "attack_block_rate": 1.0,
+        "attack_cases": 12,
+        "benign_cases": 6,
+        "false_block_rate": 0.0,
+        "secret_leak_rate": 0.0
+      },
+      "source": "artifacts/security-quality-v4.json",
+      "status": "available"
+    },
+    "tool_protocol": {
+      "metrics": {
+        "failed": 0,
+        "native_call_contract_rate": 1.0,
+        "network_calls": 0,
+        "pass_rate": 1.0,
+        "passed": 6,
+        "schema_conversion_rate": 1.0,
+        "total_cases": 6,
+        "xml_fallback_contract_rate": 1.0
+      },
+      "source": "artifacts/tool-protocol-v1/protocol.json",
+      "status": "available"
+    }
+  },
+  "captured_at_utc": "2026-08-17T02:16:47.917817+00:00",
+  "claim_boundary": "Generation metrics and deterministic harness results are not official SWE-bench solve rate. Only official Docker harness output can populate official_resolved.",
+  "execution_policy": {
+    "ablation_modes": [
+      "policy_off",
+      "policy_on"
+    ],
+    "comparison_contract": "same selection, model, temperature, step budget, timeout and sandbox",
+    "default": "on"
+  },
+  "git_revision": "f4070ec6d6fa30b627b224fb047887dc77f5c18c",
+  "local_verification": {
+    "commands": [],
+    "status": "passed"
+  },
+  "model_provider": {
+    "deterministic": {
+      "model": "FakeModelClient",
+      "provider": "scripted",
+      "version": "scripted-policy-v1"
+    },
+    "historical_deepseek": {
+      "model": "deepseek-v4-pro",
+      "provider": "deepseek",
+      "scope": "six fixed local development tasks, one run per condition",
+      "status": "historical_v3_evidence"
+    },
+    "swebench_v4": {
+      "model": "deepseek-v4-pro",
+      "provider": "deepseek",
+      "status": "not_run_until_explicitly_started"
+    }
+  },
+  "official_evaluation": {
+    "historical_preflight": {
+      "claim": "historical preflight only; not a general solve rate",
+      "official_instances": 1,
+      "official_resolved": 0,
+      "source": "benchmarks/swebench/results/preflight-2026-08-11.json",
+      "status": "recorded_separately"
+    },
+    "v4": {
+      "official_resolved": null,
+      "official_resolved_rate": null,
+      "source": "artifacts/swebench/results/v4-*/official_grade_summary.json",
+      "status": "not_run"
+    }
+  },
+  "raw_artifact_paths": [
+    "artifacts/reporuntimebench-ablation-v1/ablation.json",
+    "artifacts/reporuntimebench-v1/benchmark.json",
+    "artifacts/security-quality-v3.json",
+    "artifacts/security-quality-v4.json",
+    "artifacts/tool-protocol-v1/protocol.json",
+    "benchmarks/reporuntimebench/results/v3-evaluation-summary.json",
+    "benchmarks/reporuntimebench/results/v3-evaluation-summary.md",
+    "benchmarks/swebench/development-v1-selection.json",
+    "benchmarks/swebench/mini-v1-selection.json",
+    "benchmarks/swebench/results/preflight-2026-08-11.json",
+    "benchmarks/swebench/results/preflight-2026-08-11.md",
+    "docs/architecture/code-intelligence.md",
+    "docs/architecture/sandbox.md",
+    "docs/evaluation/swebench-methodology.md"
+  ],
+  "repetitions": {
+    "deterministic_reporuntimebench": 1,
+    "historical_deepseek_development": 1,
+    "swebench_formal_completed": false,
+    "swebench_formal_target": 3,
+    "swebench_pilot": 1
+  },
+  "sandbox": {
+    "default_mode": "host",
+    "docker_mode": "explicit_only",
+    "docker_network": "none",
+    "docker_non_root": true,
+    "docker_read_only_root": true,
+    "host_fallback_when_docker_selected": false,
+    "official_swebench_grader": "separate_linux_docker_step"
+  },
+  "schema_version": "v4-evidence-v1",
+  "selection_files": {
+    "development": {
+      "path": "benchmarks/swebench/development-v1-selection.json",
+      "sha256": "5c03ec12844fd9bded2bf064d7ee9f296ad36784cd0e232ce2183cd41c6e148e",
+      "status": "present"
+    },
+    "mini": {
+      "path": "benchmarks/swebench/mini-v1-selection.json",
+      "sha256": "290060190ee4a467e6d0326099fc8280c9755bfc7410c2401d10da10d2cb7e8e",
+      "status": "present"
+    }
+  },
+  "working_tree_diff_sha256": "b02326d06da63d078c75d74e0d03671025692b6aa7896b68a204282901eb7113",
+  "working_tree_dirty": true
+}

@@ -260,6 +260,15 @@ def build_agent(args):
     tool_providers = []
     if mcp_config:
         tool_providers = [MCPToolProvider(config) for config in load_mcp_server_configs(mcp_config)]
+    sandbox_config = {
+        "mode": getattr(args, "sandbox", "host"),
+        "image": getattr(args, "sandbox_image", None) or "python:3.11-slim",
+        "network": getattr(args, "sandbox_network", "none"),
+        "cpus": getattr(args, "sandbox_cpus", 2.0),
+        "memory": getattr(args, "sandbox_memory", "1g"),
+        "pids_limit": getattr(args, "sandbox_pids_limit", 128),
+        "user": getattr(args, "sandbox_user", "65532:65532"),
+    }
     session_id = args.resume
     if session_id == "latest":
         session_id = store.latest()
@@ -280,10 +289,12 @@ def build_agent(args):
             verify_timeout=getattr(args, "verify_timeout", 60),
             max_verification_attempts=getattr(args, "max_verification_attempts", 2),
             task_mode=getattr(args, "task_mode", "auto"),
+            execution_policy={"enabled": getattr(args, "execution_policy", "on") != "off"},
             secret_env_names=configured_secret_names,
             skill_paths=skill_paths,
             tool_providers=tool_providers,
             workspace_lease=workspace_lease,
+            sandbox_config=sandbox_config,
         )
     return Pico(
         model_client=model,
@@ -300,10 +311,12 @@ def build_agent(args):
         verify_timeout=getattr(args, "verify_timeout", 60),
         max_verification_attempts=getattr(args, "max_verification_attempts", 2),
         task_mode=getattr(args, "task_mode", "auto"),
+        execution_policy={"enabled": getattr(args, "execution_policy", "on") != "off"},
         secret_env_names=configured_secret_names,
         skill_paths=skill_paths,
         tool_providers=tool_providers,
         workspace_lease=workspace_lease,
+        sandbox_config=sandbox_config,
     )
 
 
@@ -321,6 +334,27 @@ def build_arg_parser():
         help="Run in the selected directory or create an isolated detached Git worktree.",
     )
     parser.add_argument("--worktree-base", default=None, help="Optional parent directory for isolated worktrees.")
+    parser.add_argument(
+        "--sandbox",
+        choices=("host", "docker"),
+        default="host",
+        help="Execution boundary for shell and verification commands. Docker never falls back to host.",
+    )
+    parser.add_argument("--sandbox-image", default="python:3.11-slim", help="Docker sandbox image.")
+    parser.add_argument(
+        "--sandbox-network",
+        choices=("none", "bridge"),
+        default="none",
+        help="Docker network mode; none is the default.",
+    )
+    parser.add_argument("--sandbox-cpus", type=float, default=2.0, help="Docker CPU limit.")
+    parser.add_argument("--sandbox-memory", default="1g", help="Docker memory limit.")
+    parser.add_argument("--sandbox-pids-limit", type=int, default=128, help="Docker PID limit.")
+    parser.add_argument(
+        "--sandbox-user",
+        default="65532:65532",
+        help="Non-root UID:GID used inside Docker; the image/worktree must support it.",
+    )
     parser.add_argument(
         "--provider",
         choices=PROVIDER_CHOICES,
@@ -384,6 +418,12 @@ def build_arg_parser():
     parser.add_argument("--verify-command", default=None, help="Run this workspace verification command before accepting a final answer.")
     parser.add_argument("--verify-timeout", type=int, default=60, help="Verification command timeout in seconds.")
     parser.add_argument("--max-verification-attempts", type=int, default=2, help="Maximum automatic repair attempts after verification failure.")
+    parser.add_argument(
+        "--execution-policy",
+        choices=("on", "off"),
+        default="on",
+        help="Enable or disable the bounded ExecutionPolicy contract; used by controlled ablations.",
+    )
     parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature sent to Ollama.")
     parser.add_argument("--top-p", type=float, default=0.9, help="Top-p sampling value sent to Ollama.")
     return parser

@@ -13,6 +13,7 @@ from functools import partial
 from .command_runner import run_shell_command
 from .patching import PatchJournal, apply_unified_diff, parse_unified_diff, preview_file_diff
 from .repo_index import RepoIndex, render_index_result
+from .sandbox import HostExecutionBackend
 from .task_graph import TaskGraph, TaskGraphError
 from .workspace import IGNORED_PATH_NAMES
 
@@ -51,6 +52,11 @@ BASE_TOOL_SPECS = {
         "schema": {"path": "str='.'"},
         "risky": False,
         "description": "Summarize indexed imports and best-effort internal dependency edges.",
+    },
+    "analyze_impact": {
+        "schema": {"target": "str", "path": "str='.'", "depth": "int=1"},
+        "risky": False,
+        "description": "Find conservative callers, importers, related tests, and candidate files for a symbol or file.",
     },
     "get_changed_files": {
         "schema": {},
@@ -146,6 +152,7 @@ TOOL_EXAMPLES = {
     "find_symbol": '<tool>{"name":"find_symbol","args":{"name":"Pico","path":"pico"}}</tool>',
     "find_references": '<tool>{"name":"find_references","args":{"name":"ToolGateway","path":"pico"}}</tool>',
     "get_dependency_graph": '<tool>{"name":"get_dependency_graph","args":{"path":"pico"}}</tool>',
+    "analyze_impact": '<tool>{"name":"analyze_impact","args":{"target":"ToolGateway","path":"pico","depth":1}}</tool>',
     "get_changed_files": '<tool>{"name":"get_changed_files","args":{}}</tool>',
     "run_shell": '<tool>{"name":"run_shell","args":{"command":"uv run --with pytest python -m pytest -q","timeout":20}}</tool>',
     "write_file": '<tool name="write_file" path="binary_search.py"><content>def binary_search(nums, target):\n    return -1\n</content></tool>',
@@ -227,6 +234,18 @@ def validate_tool(context, name, args):
         path = context.path(args.get("path", "."))
         if not path.exists():
             raise ValueError("path does not exist")
+        return
+
+    if name == "analyze_impact":
+        target = str(args.get("target", "")).strip()
+        if not target:
+            raise ValueError("target must not be empty")
+        path = context.path(args.get("path", "."))
+        if not path.exists():
+            raise ValueError("path does not exist")
+        depth = int(args.get("depth", 1))
+        if depth < 1 or depth > 2:
+            raise ValueError("depth must be in [1, 2]")
         return
 
     if name == "get_changed_files":
@@ -445,6 +464,16 @@ def tool_get_dependency_graph(context, args):
     )
 
 
+def tool_analyze_impact(context, args):
+    return render_index_result(
+        _repo_index(context).analyze_impact(
+            args["target"],
+            args.get("path", "."),
+            args.get("depth", 1),
+        )
+    )
+
+
 def tool_get_changed_files(context, args):
     return render_index_result(_repo_index(context).changed_files())
 
@@ -456,18 +485,30 @@ def tool_run_shell(context, args):
     timeout = int(args.get("timeout", 20))
     if timeout < 1 or timeout > 120:
         raise ValueError("timeout must be in [1, 120]")
-    result = run_shell_command(
+    backend = context.execution_backend
+    if backend is None or getattr(backend, "mode", "host") == "host":
+        # Keep the historical injection point ``pico.tools.subprocess.run``
+        # observable for callers/tests while retaining the backend contract.
+        backend = HostExecutionBackend(
+            runner=run_shell_command,
+            subprocess_runner=subprocess.run,
+        )
+    result = backend.run(
         command,
         cwd=context.root,
         timeout=timeout,
         # 这里传入的是过滤后的环境变量，而不是直接继承整个父 shell 环境，
         # 目的是减少敏感信息被意外带进命令执行环境的风险。
         env=context.shell_env(),
-        runner=subprocess.run,
     )
     return textwrap.dedent(
         f"""\
         exit_code: {result.returncode}
+        execution_backend: {result.execution_backend}
+        sandbox_mode: {result.sandbox_mode}
+        timeout_killed: {str(result.timeout_killed).lower()}
+        oom_killed: {str(result.oom_killed).lower()}
+        resource_limit_reason: {result.resource_limit_reason or "none"}
         stdout:
         {result.stdout.strip() or "(empty)"}
         stderr:
@@ -550,6 +591,7 @@ _TOOL_RUNNERS = {
     "find_symbol": tool_find_symbol,
     "find_references": tool_find_references,
     "get_dependency_graph": tool_get_dependency_graph,
+    "analyze_impact": tool_analyze_impact,
     "get_changed_files": tool_get_changed_files,
     "run_shell": tool_run_shell,
     "write_file": tool_write_file,

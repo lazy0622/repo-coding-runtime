@@ -11,7 +11,8 @@ flowchart LR
     S --> A["Agent Loop"]
     A --> G["Tool Gateway + Approval + Safety"]
     G --> T["Read / Patch / Shell / MCP"]
-    T --> V["Tests and hidden verifier"]
+    T --> B["Host or Docker Execution Backend"]
+    B --> V["Tests and hidden verifier"]
     V -->|pass| R["Checkpoint + Trace + Report"]
     V -->|fail within budget| A
     S --> M["Memory + Context Compression"]
@@ -38,9 +39,10 @@ repo --cwd . --task-mode inspect "定位 ExecutionPolicy 的阶段预算实现�
 | Execution Policy 消融 | 24 | 23/24 → 24/24 | 相同 fixture/脚本输出下纠正 premature final |
 | DeepSeek development | 6 | policy on 6/6；off 6/6 | 单次固定开发集可运行性，不代表通用成功率 |
 | Security quality | 3 次固定场景 | 拦截 100%；误拦截 0%；泄漏 0% | 当前本地工具与工件边界，不等于完整渗透测试 |
-| SWE-bench Lite preflight | 1 个固定真实实例 | 官方 0/1；另一次空补丁 | 链路已打通，但尚不能声称真实 issue 解决率 |
+| Native Tool Protocol | 6 个无网络合同用例 | 6/6；native/XML/schema 均 1.0 | provider 适配与回退链路，不代表模型质量 |
+| SWE-bench Lite preflight | 1 个固定真实实例 | 历史官方 0/1；另一次空补丁 | 链路已打通，但尚不能声称真实 issue 解决率 |
 
-完整口径、失败记录与数据来源见 [`benchmarks/reporuntimebench/results/v3-evaluation-summary.md`](benchmarks/reporuntimebench/results/v3-evaluation-summary.md) 和 [`SWE-bench Lite preflight`](benchmarks/swebench/results/preflight-2026-08-11.md)。固定 fixture 结果和真实模型结果严格分层，不把本地回归冒充 SWE-bench solve rate。
+完整口径、失败记录与数据来源见 [`V4 Evidence`](benchmarks/reporuntimebench/results/v4-evidence-summary.md)、[`v3 evaluation summary`](benchmarks/reporuntimebench/results/v3-evaluation-summary.md) 和 [`SWE-bench Lite preflight`](benchmarks/swebench/results/preflight-2026-08-11.md)。固定 fixture 结果和真实模型结果严格分层，不把本地回归冒充 SWE-bench solve rate。
 
 ## 适合做什么
 
@@ -58,6 +60,8 @@ repo --cwd . --task-mode inspect "定位 ExecutionPolicy 的阶段预算实现�
 - 分层记忆、上下文压缩、checkpoint/resume 与稳定 runtime identity
 - 版本化运行事件：保留旧 `event` 字段，同时提供 `event_type`、schema version、run/task/phase 标识
 - 可选 Git worktree 隔离；脏工作区不会被自动删除
+- Shell 与 verifier 支持显式 Host 或 Docker 执行后端；Docker 模式默认无网络、非 root、只读根文件系统并限制资源，失败不会静默回退到 Host
+- Repo Index v3 持久化 Python 调用记录，提供带 confidence/diagnostics 的 `analyze_impact` 影响分析；结果是导航证据，不替代源码和测试
 - 原子保存 session、task state 和 report
 - CLI 命令是 `repo`（同时兼容旧命令 `pico`），模块入口是 `python -m pico`
 - 会话保存在 `.pico/sessions/`，运行工件保存在 `.pico/runs/<run_id>/`
@@ -124,6 +128,18 @@ uv run repo --cwd /path/to/repo --workspace-mode worktree
 ```
 
 该模式不会自动删除包含未提交改动的 worktree。运行目录会显示在启动界面，并写入 `report.json`，由使用者确认改动后再显式处理。
+
+需要把 Agent 的 Shell 和 verifier 放入显式 Docker Sandbox 时：
+
+```bash
+uv run repo --cwd /path/to/repo --sandbox docker \
+  --sandbox-image repo-runtime:py311
+```
+
+Docker 模式要求镜像已经包含项目所需的 Python/测试工具链；默认使用
+`network=none`，只挂载当前工作区，且 Docker 不可用时会返回结构化错误，
+不会自动改在宿主机执行。普通 Host 模式保持默认，以兼容 Windows/POSIX
+命令和现有本地开发环境。
 
 如果当前环境已经安装过包，也可以直接这样启动：
 
@@ -486,6 +502,64 @@ Demo 会分别验证成功交付和验证失败自动回滚。超时使用 provi
 ```
 
 使用方法和实验分层见 `benchmarks/reporuntimebench/README.md` 与 `benchmarks/swebench/README.md`；关键架构取舍见 `docs/architecture/decisions.md`。
+
+## V4.3：固定真实仓库评测矩阵
+
+V4.3 将已有 SWE-bench adapter 升级为可复现的固定开发集流程：
+
+- `scripts/run_swebench_matrix.py` 支持 `policy_on|policy_off|both`、pilot（1 次）和正式 3 次重复运行，固定实例、模型、温度、步骤预算、超时和 sandbox 配置；
+- `generation_metrics` 单独记录 Agent 完成、非空 patch、工具步骤、首次编辑、验证修复、观测 token、延迟和失败样本；
+- `pico/evaluation/swebench_results.py` 只解析官方 Docker harness 工件，严格区分 `official_resolved` 与生成诊断；缺少官方工件时状态为 `not_run`/`partial`/`failed`，不会把 `agent_completed` 写成 solve rate；
+- `matrix_manifest.json` 保存固定选择和 Git provenance，`failures/` 保留 bad case，方便面试时解释实验边界和失败原因。
+
+先生成固定实例 manifest，再运行 pilot：
+
+```powershell
+python scripts/prepare_swebench_mini.py --selection benchmarks/swebench/development-v1-selection.json --output artifacts/swebench/development-v1/instances.jsonl
+python scripts/run_swebench_matrix.py --selection benchmarks/swebench/development-v1-selection.json --manifest artifacts/swebench/development-v1/instances.jsonl --mode both --repetitions 1 --generate-only --agent-command-json '["python","-m","pico","--provider","deepseek","--approval","auto","--task-mode","edit","--max-new-tokens","4096","{problem_statement}"]' --output-dir artifacts/swebench/results/v4-pilot
+```
+
+完整协议、正式 3-rep 命令和官方 grading 入口见 [`docs/evaluation/swebench-methodology.md`](docs/evaluation/swebench-methodology.md)。当前仓库未因增加 runner 而自动消耗真实模型额度；没有官方 Docker 结果时，README 只能声称 generation/preflight 已完成，不能声称 SWE-bench solve rate。
+
+## V4.4：原生 Tool Calling 与兼容回退
+
+OpenAI Responses 和 Anthropic Messages provider 现在会把当前工具注册表转换成
+provider 原生的 function/tool schema，并将原生 `function_call`/`tool_use`
+归一化为统一的 `ToolCall`。Runtime 优先执行结构化调用；Ollama、FakeModelClient
+以及不具备原生工具能力的兼容后端继续使用原有 XML 文本协议。
+
+这一层只替换“模型如何表达工具调用”，不绕过 ToolGateway、参数校验、审批、
+ExecutionPolicy、PatchJournal 或 Sandbox。当前控制循环保持每轮一个原生工具调用，
+工具结果继续写入 Session history 后再请求下一轮。provider contract tests 使用
+mock HTTP 响应，不需要 API key，也不会消耗真实模型额度。
+
+## V4 Evidence 与发布口径
+
+V4 Evidence 汇总 Git revision、工作区差异摘要、固定 selection 文件 hash、模型/provider、ExecutionPolicy、Host/Docker sandbox、重复次数、Benchmark 原始工件和本地验证命令。生成命令：
+
+```powershell
+python scripts/write_v4_evidence.py --verification-status passed
+```
+
+普通 CI 只运行无密钥的单元测试、RepoIndex/Sandbox 合同测试、确定性 RepoRuntimeBench 和安全质量回归；Docker integration、真实 DeepSeek 和官方 SWE-bench grader 必须显式执行，不在普通 PR 中强制消耗费用或依赖 Docker。
+
+## 简历安全表述
+
+可以写：
+
+- 设计并实现面向本地代码仓库的 Coding Agent Runtime，统一 Agent Loop、RepoIndex、ToolGateway、ExecutionPolicy、Verifier、Checkpoint/Trace/Report 和 Patch/Rollback 闭环；
+- 实现 RepoIndex v3 的 Python 调用记录、bounded impact analysis 与持久化索引，输出带证据和 confidence 的 callers/callees/related tests；
+- 实现显式 Host/Docker 执行后端，Docker 模式支持无网络、非 root、只读根文件系统、环境变量 allowlist、资源限制、超时/OOM 清理和失败报告；
+- 使用 24 个固定 fixture 任务完成确定性 Runtime Harness 回归，并通过相同输入的 ExecutionPolicy on/off 消融验证过早结束纠正；
+- 建立 generation metrics 与 official SWE-bench grade 分层的固定真实仓库评测流程，保留失败样本和可复现元数据。
+- 接入 OpenAI Responses/Anthropic Messages 原生 Tool Calling，并保留 XML fallback，统一记录 tool protocol、调用数量、工具名和 provider stop reason。
+
+不能写：
+
+- “SWE-bench 通用解决率达到 X%”；
+- “Agent 自动修复真实 issue 的准确率提升 X%”（没有完整官方 grade 时）；
+- “已完成 5 个真实仓库 × 3 次正式评测”（尚未实际运行时）；
+- “Docker sandbox 已隔离所有安全风险”。
 
 ## 安全与持久化
 
