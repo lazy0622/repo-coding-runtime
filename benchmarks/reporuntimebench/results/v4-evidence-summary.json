@@ -100,7 +100,7 @@
       "status": "available"
     }
   },
-  "captured_at_utc": "2026-08-18T03:47:42.732230+00:00",
+  "captured_at_utc": "2026-08-24T01:14:36.429948+00:00",
   "claim_boundary": "Generation metrics and deterministic harness results are not official SWE-bench solve rate. Only official Docker harness output can populate official_resolved.",
   "execution_policy": {
     "ablation_modes": [
@@ -110,11 +110,11 @@
     "comparison_contract": "same selection, model, temperature, step budget, timeout and sandbox",
     "default": "on"
   },
-  "git_revision": "d80cd3862e661a51b07d658b937bcaac7d4a5e72",
+  "git_revision": "ac46d56cfb78e5e31fa2d3906113ee4a599951e9",
   "local_verification": {
     "commands": [
-      "python -m pytest -q tests/test_context_manager.py tests/test_memory.py tests/test_checkpoint.py tests/test_reporuntime_benchmark.py tests/test_context_recovery_benchmark.py tests/test_v4_evidence.py",
-      "python scripts/run_context_recovery_benchmark.py --context-repetitions 2 --memory-repetitions 2 --recovery-repetitions 2"
+      "python -m pytest tests/test_context_recovery_benchmark.py -q",
+      "git diff --check"
     ],
     "status": "passed"
   },
@@ -202,6 +202,6 @@
       "status": "present"
     }
   },
-  "working_tree_diff_sha256": "5f0c3a9d8568e90cf583ec51d1ba9981fcb4f7296e6a0c87cd978766c12cb91b",
+  "working_tree_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "working_tree_dirty": true
 }

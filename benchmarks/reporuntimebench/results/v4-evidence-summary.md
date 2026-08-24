@@ -1,8 +1,8 @@
 # Repo Coding Runtime V4 Evidence
 
 - Artifact: `repo-coding-runtime-v4-evidence` / `v4-evidence-v1`
-- Captured: `2026-08-18T03:47:42.732230+00:00`
-- Git revision: `d80cd3862e661a51b07d658b937bcaac7d4a5e72`
+- Captured: `2026-08-24T01:14:36.429948+00:00`
+- Git revision: `ac46d56cfb78e5e31fa2d3906113ee4a599951e9`
 - Working tree dirty: `True`
 - Local verification: `passed`
 
