@@ -1,0 +1,75 @@
+{
+  "artifact_type": "context-memory-recovery-ablation",
+  "captured_at_utc": "2026-08-18T03:39:39.702003+00:00",
+  "claim_boundary": [
+    "These are deterministic runtime/module ablations, not online user data.",
+    "The model client is scripted and no provider API was called.",
+    "The results do not measure general coding success or SWE-bench solve rate."
+  ],
+  "context": {
+    "avg_compression_rate": 0.34637987751071725,
+    "baseline_prompt_chars": 9634.333333333334,
+    "config_count": 12,
+    "current_request_preserved_rate": 1.0,
+    "max_compression_rate": 0.43101745143233455,
+    "prompt_chars_reduced": 3460.666666666667,
+    "reduced_prompt_chars": 6173.666666666667,
+    "sample_runs": 24
+  },
+  "memory": {
+    "avg_tool_steps_reduction_rate": 1.0,
+    "correct_rate_delta": 0.0,
+    "memory_off": {
+      "avg_attempts": 2.0,
+      "avg_tool_steps": 1.0,
+      "correct_rate": 1.0,
+      "memory_hit_rate": 0.0,
+      "repeated_reads": 24
+    },
+    "memory_on": {
+      "avg_attempts": 1.0,
+      "avg_tool_steps": 0.0,
+      "correct_rate": 1.0,
+      "memory_hit_rate": 1.0,
+      "repeated_reads": 0
+    },
+    "repeated_reads_reduced": 24,
+    "repeated_reads_reduction_rate": 1.0,
+    "sample_runs_per_variant": 24,
+    "task_count": 12
+  },
+  "provenance": {
+    "external_api_calls": 0,
+    "git_revision": "d80cd3862e661a51b07d658b937bcaac7d4a5e72",
+    "model_client": "FakeModelClient/scripted deterministic clients",
+    "network_required": false,
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.11.6",
+    "temperature": null
+  },
+  "recovery": {
+    "quality": {
+      "enabled_runs": 20,
+      "false_accept_rate": 0.0,
+      "invalid_state_rejection_rate": 1.0,
+      "invalid_state_runs": 12,
+      "resume_status_accuracy": 1.0,
+      "valid_resume_runs": 8,
+      "valid_resume_success_rate": 1.0
+    },
+    "resume_enabled": {
+      "resume_false_accept_rate": 0.0,
+      "resume_success_rate": 0.9,
+      "stale_reanchor_rate": 1.0,
+      "workspace_drift_detection_rate": 1.0
+    },
+    "sample_runs_per_variant": 20,
+    "task_count": 10
+  },
+  "repetitions": {
+    "context": 2,
+    "memory": 2,
+    "recovery": 2
+  },
+  "schema_version": "repo-coding-runtime-context-recovery-v1"
+}

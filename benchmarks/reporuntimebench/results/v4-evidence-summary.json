@@ -1,6 +1,26 @@
 {
   "artifact_type": "repo-coding-runtime-v4-evidence",
   "benchmark_evidence": {
+    "context_memory_recovery": {
+      "metrics": {
+        "avg_compression_rate": 0.34637987751071725,
+        "context_config_count": 12,
+        "context_sample_runs": 24,
+        "current_request_preserved_rate": 1.0,
+        "false_accept_rate": 0.0,
+        "invalid_state_rejection_rate": 1.0,
+        "max_compression_rate": 0.43101745143233455,
+        "memory_avg_tool_steps_reduction_rate": 1.0,
+        "memory_repeated_reads_reduction_rate": 1.0,
+        "memory_task_count": 12,
+        "recovery_task_count": 10,
+        "resume_status_accuracy": 1.0,
+        "valid_resume_success_rate": 1.0,
+        "workspace_drift_detection_rate": 1.0
+      },
+      "source": "benchmarks/reporuntimebench/results/v4.5-context-recovery/context-recovery-summary.json",
+      "status": "available"
+    },
     "policy_ablation": {
       "metrics": {
         "delta": {
@@ -80,7 +100,7 @@
       "status": "available"
     }
   },
-  "captured_at_utc": "2026-08-17T02:16:47.917817+00:00",
+  "captured_at_utc": "2026-08-18T03:47:42.732230+00:00",
   "claim_boundary": "Generation metrics and deterministic harness results are not official SWE-bench solve rate. Only official Docker harness output can populate official_resolved.",
   "execution_policy": {
     "ablation_modes": [
@@ -90,9 +110,12 @@
     "comparison_contract": "same selection, model, temperature, step budget, timeout and sandbox",
     "default": "on"
   },
-  "git_revision": "f4070ec6d6fa30b627b224fb047887dc77f5c18c",
+  "git_revision": "d80cd3862e661a51b07d658b937bcaac7d4a5e72",
   "local_verification": {
-    "commands": [],
+    "commands": [
+      "python -m pytest -q tests/test_context_manager.py tests/test_memory.py tests/test_checkpoint.py tests/test_reporuntime_benchmark.py tests/test_context_recovery_benchmark.py tests/test_v4_evidence.py",
+      "python scripts/run_context_recovery_benchmark.py --context-repetitions 2 --memory-repetitions 2 --recovery-repetitions 2"
+    ],
     "status": "passed"
   },
   "model_provider": {
@@ -136,6 +159,12 @@
     "artifacts/tool-protocol-v1/protocol.json",
     "benchmarks/reporuntimebench/results/v3-evaluation-summary.json",
     "benchmarks/reporuntimebench/results/v3-evaluation-summary.md",
+    "benchmarks/reporuntimebench/results/v4-evidence-summary.json",
+    "benchmarks/reporuntimebench/results/v4.5-context-recovery/context-recovery-summary.json",
+    "benchmarks/reporuntimebench/results/v4.5-context-recovery/context-recovery-summary.md",
+    "benchmarks/reporuntimebench/results/v4.5-context-recovery/raw/context-ablation-v2.json",
+    "benchmarks/reporuntimebench/results/v4.5-context-recovery/raw/memory-ablation-v2.json",
+    "benchmarks/reporuntimebench/results/v4.5-context-recovery/raw/recovery-ablation-v2.json",
     "benchmarks/swebench/development-v1-selection.json",
     "benchmarks/swebench/mini-v1-selection.json",
     "benchmarks/swebench/results/preflight-2026-08-11.json",
@@ -173,6 +202,6 @@
       "status": "present"
     }
   },
-  "working_tree_diff_sha256": "b02326d06da63d078c75d74e0d03671025692b6aa7896b68a204282901eb7113",
+  "working_tree_diff_sha256": "5f0c3a9d8568e90cf583ec51d1ba9981fcb4f7296e6a0c87cd978766c12cb91b",
   "working_tree_dirty": true
 }

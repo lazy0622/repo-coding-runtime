@@ -40,9 +40,11 @@ repo --cwd . --task-mode inspect "定位 ExecutionPolicy 的阶段预算实现�
 | DeepSeek development | 6 | policy on 6/6；off 6/6 | 单次固定开发集可运行性，不代表通用成功率 |
 | Security quality | 3 次固定场景 | 拦截 100%；误拦截 0%；泄漏 0% | 当前本地工具与工件边界，不等于完整渗透测试 |
 | Native Tool Protocol | 6 个无网络合同用例 | 6/6；native/XML/schema 均 1.0 | provider 适配与回退链路，不代表模型质量 |
+| Context/Memory ablation | 12 组 context；12 个 memory 任务 | prompt 9634→6174 字符；平均压缩 34.64%；重复读 24→0 | 当前分支的上下文治理与记忆召回收益 |
+| Checkpoint/Resume recovery | 10 个场景 | 有效 resume 8/8；状态准确率 20/20；漂移识别 4/4；误接受 0 | 恢复状态判定与 workspace 漂移边界 |
 | SWE-bench Lite preflight | 1 个固定真实实例 | 历史官方 0/1；另一次空补丁 | 链路已打通，但尚不能声称真实 issue 解决率 |
 
-完整口径、失败记录与数据来源见 [`V4 Evidence`](benchmarks/reporuntimebench/results/v4-evidence-summary.md)、[`v3 evaluation summary`](benchmarks/reporuntimebench/results/v3-evaluation-summary.md) 和 [`SWE-bench Lite preflight`](benchmarks/swebench/results/preflight-2026-08-11.md)。固定 fixture 结果和真实模型结果严格分层，不把本地回归冒充 SWE-bench solve rate。
+完整口径、失败记录与数据来源见 [`V4 Evidence`](benchmarks/reporuntimebench/results/v4-evidence-summary.md)、[`Context/Memory/Recovery 当前结果`](benchmarks/reporuntimebench/results/v4.5-context-recovery/context-recovery-summary.md)、[`v3 evaluation summary`](benchmarks/reporuntimebench/results/v3-evaluation-summary.md) 和 [`SWE-bench Lite preflight`](benchmarks/swebench/results/preflight-2026-08-11.md)。固定 fixture 结果和真实模型结果严格分层，不把本地回归冒充 SWE-bench solve rate。
 
 ## 适合做什么
 
@@ -532,6 +534,27 @@ provider 原生的 function/tool schema，并将原生 `function_call`/`tool_use
 ExecutionPolicy、PatchJournal 或 Sandbox。当前控制循环保持每轮一个原生工具调用，
 工具结果继续写入 Session history 后再请求下一轮。provider contract tests 使用
 mock HTTP 响应，不需要 API key，也不会消耗真实模型额度。
+
+## V4.5：Context / Memory / Recovery 量化评测
+
+当前分支新增一套只使用本地 fixture 和 scripted model 的确定性模块评测，专门测量
+上下文治理、工作记忆和 checkpoint/resume，而不是把模型最终回答当作唯一指标：
+
+- Context：固定 12 组 history/note/request 压力配置，2 次重复共 24 次运行；对比关闭治理与完整治理的 prompt 字符数，并检查 current request 是否保留。
+- Memory：固定 12 个记忆依赖任务，2 次重复、每个 variant 24 次运行；对比 `memory_off` 与 `memory_on` 的 follow-up 重复读、工具步数和事实正确率。
+- Recovery：固定 10 个 checkpoint/resume 场景，2 次重复、每个 variant 20 次运行；覆盖 clean resume、partial stale、workspace mismatch、schema mismatch 和 partial-success recovery。
+
+本次当前工作区结果为：平均 prompt 从 9634.33 降至 6173.67 字符，平均压缩 34.64%，最大压缩 43.10%，current request 保留率 100%；Memory follow-up 重复读从 24 降至 0，工具步数从 1.00 降至 0.00，memory-on 正确率 100%；Recovery 有效 resume 8/8，状态准确率 20/20，workspace 漂移识别 4/4，无效状态拒绝 12/12，stale-state false accept 为 0。
+
+运行命令：
+
+```powershell
+python scripts/run_context_recovery_benchmark.py --context-repetitions 2 --memory-repetitions 2 --recovery-repetitions 2
+```
+
+产物写入 `benchmarks/reporuntimebench/results/v4.5-context-recovery/`。评测使用
+`FakeModelClient`/scripted client，外部 API 调用数为 0；这些指标证明 runtime 模块
+在固定场景下的行为，不代表在线模型的通用 coding 成功率，也不代表 SWE-bench solve rate。
 
 ## V4 Evidence 与发布口径
 

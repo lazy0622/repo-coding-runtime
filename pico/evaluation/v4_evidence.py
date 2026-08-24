@@ -165,6 +165,33 @@ def _tool_protocol_metrics(data):
     }
 
 
+def _context_recovery_metrics(data):
+    if not isinstance(data, dict):
+        return {}
+    context = data.get("context") or {}
+    memory = data.get("memory") or {}
+    recovery = data.get("recovery") or {}
+    quality = recovery.get("quality") or {}
+    return {
+        "context_config_count": context.get("config_count"),
+        "context_sample_runs": context.get("sample_runs"),
+        "avg_compression_rate": context.get("avg_compression_rate"),
+        "max_compression_rate": context.get("max_compression_rate"),
+        "current_request_preserved_rate": context.get("current_request_preserved_rate"),
+        "memory_task_count": memory.get("task_count"),
+        "memory_repeated_reads_reduction_rate": memory.get("repeated_reads_reduction_rate"),
+        "memory_avg_tool_steps_reduction_rate": memory.get("avg_tool_steps_reduction_rate"),
+        "recovery_task_count": recovery.get("task_count"),
+        "valid_resume_success_rate": quality.get("valid_resume_success_rate"),
+        "resume_status_accuracy": quality.get("resume_status_accuracy"),
+        "workspace_drift_detection_rate": (recovery.get("resume_enabled") or {}).get(
+            "workspace_drift_detection_rate"
+        ),
+        "invalid_state_rejection_rate": quality.get("invalid_state_rejection_rate"),
+        "false_accept_rate": quality.get("false_accept_rate"),
+    }
+
+
 def _load_optional_artifact(root, candidates, summarizer):
     path, data = _first_existing(root, candidates)
     if path is None:
@@ -209,6 +236,8 @@ def _raw_paths(root):
         "artifacts/reporuntimebench-ablation-v1/ablation.json",
         "artifacts/security-quality-v4.json",
         "artifacts/tool-protocol-v1/protocol.json",
+        "benchmarks/reporuntimebench/results/v4.5-context-recovery/context-recovery-summary.json",
+        "benchmarks/reporuntimebench/results/v4.5-context-recovery/context-recovery-summary.md",
         "artifacts/security-quality-v3.json",
         "benchmarks/reporuntimebench/results/v3-evaluation-summary.json",
         "benchmarks/reporuntimebench/results/v3-evaluation-summary.md",
@@ -220,8 +249,13 @@ def _raw_paths(root):
         "docs/architecture/sandbox.md",
         "docs/architecture/code-intelligence.md",
     ]
-    for directory in (Path(root) / "artifacts",):
+    for directory in (
+        Path(root) / "artifacts",
+        Path(root) / "benchmarks" / "reporuntimebench" / "results",
+    ):
         if directory.is_dir():
+            for path in directory.glob("**/v4.5-context-recovery/raw/*.json"):
+                candidates.append(_relative(root, path))
             for path in directory.glob("**/v4-evidence-summary.json"):
                 candidates.append(_relative(root, path))
             for path in directory.glob("**/official_grade_summary.json"):
@@ -263,6 +297,13 @@ def build_v4_evidence(root, verification=None, captured_at=None):
         root,
         ["artifacts/tool-protocol-v1/protocol.json"],
         _tool_protocol_metrics,
+    )
+    context_recovery = _load_optional_artifact(
+        root,
+        [
+            "benchmarks/reporuntimebench/results/v4.5-context-recovery/context-recovery-summary.json",
+        ],
+        _context_recovery_metrics,
     )
     captured_at = captured_at or datetime.now(timezone.utc).isoformat()
     evidence = {
@@ -318,6 +359,7 @@ def build_v4_evidence(root, verification=None, captured_at=None):
             "policy_ablation": policy,
             "security_quality": security,
             "tool_protocol": tool_protocol,
+            "context_memory_recovery": context_recovery,
         },
         "official_evaluation": {
             "v4": _latest_official_grade(root),
@@ -350,6 +392,7 @@ def render_v4_evidence(evidence):
     policy = evidence["benchmark_evidence"]["policy_ablation"]
     security = evidence["benchmark_evidence"]["security_quality"]
     tool_protocol = evidence["benchmark_evidence"]["tool_protocol"]
+    context_recovery = evidence["benchmark_evidence"]["context_memory_recovery"]
     official = evidence["official_evaluation"]["v4"]
     lines = [
         "# Repo Coding Runtime V4 Evidence",
@@ -366,6 +409,7 @@ def render_v4_evidence(evidence):
         f"- Policy ablation: `{policy['status']}`; metrics: `{json.dumps(policy['metrics'], ensure_ascii=False, sort_keys=True)}`",
         f"- Security quality: `{security['status']}`; metrics: `{json.dumps(security['metrics'], ensure_ascii=False, sort_keys=True)}`",
         f"- Native Tool Protocol: `{tool_protocol['status']}`; metrics: `{json.dumps(tool_protocol['metrics'], ensure_ascii=False, sort_keys=True)}`",
+        f"- Context/Memory/Recovery: `{context_recovery['status']}`; metrics: `{json.dumps(context_recovery['metrics'], ensure_ascii=False, sort_keys=True)}`",
         f"- V4 official SWE-bench grade: `{official['status']}`",
         "",
         "## Safe claims",
