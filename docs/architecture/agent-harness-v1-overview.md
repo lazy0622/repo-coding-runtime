@@ -138,3 +138,44 @@ the verifier, and rolls back only when the backup fingerprint still matches.
 The parent/model is still responsible for proposing the patch; this tool
 enforces the order and safety boundary rather than claiming autonomous code
 generation.
+
+## V4 Code Intelligence and Execution Backends
+
+RepoIndex v3 extends navigation with Python `CallRecord` evidence and bounded
+`analyze_impact`. It reports definitions, direct/indirect callers, callees,
+related tests, diagnostics and confidence. The index is a persistent
+navigation cache, not a substitute for reading source or running tests; the
+parser stays conservative when a dynamic call cannot be resolved.
+
+Shell and verifier execution use an explicit backend boundary. Host mode keeps
+local development compatible. Docker mode creates a persistent session with a
+fixed workspace mount, no network by default, a non-root user, read-only root
+filesystem, resource limits, environment allowlisting, timeout/OOM reporting
+and cleanup. Selecting Docker never silently falls back to Host. Worktree
+isolation protects Git changes; the Docker backend limits the process
+environment. They solve different failure classes and are intentionally
+composable.
+
+## V4 Evaluation Boundary
+
+The fixed real-repository evaluation is split into generation and official
+grading. The matrix runner fixes the selection, commit, model budget,
+temperature, timeout and sandbox, then compares `ExecutionPolicy` on/off while
+retaining failures. `generation_metrics` contains process and patch evidence;
+only an official Docker harness artifact can populate `official_resolved`.
+Deterministic RepoRuntimeBench remains the fast regression suite for runtime
+contracts, not a live-model or SWE-bench solve-rate measurement.
+
+## V4.4 Native Tool Protocol
+
+The provider adapter converts the active `ToolRegistry` into provider-specific
+schemas. OpenAI Responses uses function tools with `parameters`; Anthropic
+Messages uses `input_schema` and returns `tool_use` blocks. Both are normalized
+into the runtime's `ToolCall` object before the existing ToolGateway boundary.
+
+Text-only providers keep the XML protocol as a compatibility fallback. This is
+deliberate: native calling improves argument transport and provider fidelity,
+but it must not bypass approval, argument validation, ExecutionPolicy, patch
+journaling, or sandbox selection. The current loop accepts one native call per
+model turn, records its protocol/call id in Trace and Session history, and
+continues with the existing multi-turn tool-result flow.

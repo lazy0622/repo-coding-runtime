@@ -40,3 +40,35 @@ fixed six-task development set:
 
 Its report is written under `artifacts/reporuntimebench-live/` and must be
 described as a smoke result, not as a benchmark solve rate.
+
+## V4 release evidence
+
+The versioned V4 evidence summary combines deterministic harness results,
+ExecutionPolicy ablation, security quality metrics, fixed SWE-bench selection
+hashes, Git provenance and the official-grade boundary. It is generated from
+local/CI artifacts without calling a model:
+
+```powershell
+python scripts/write_v4_evidence.py --verification-status passed
+```
+
+The committed summary is
+`results/v4-evidence-summary.json` with a Markdown companion. A local working
+tree is explicitly marked dirty; after a release commit, regenerate the
+summary so its `git_revision` identifies that commit. Missing live-model or
+official Docker artifacts remain `not_run` rather than being inferred from a
+non-empty patch.
+
+## Native Tool Protocol regression
+
+The provider-native tool-call adapter has a deterministic, network-free
+contract benchmark. It checks native call normalization, malformed and
+multiple-call rejection, XML fallback, and OpenAI/Anthropic schema conversion:
+
+```powershell
+python scripts/run_tool_protocol_benchmark.py
+```
+
+The JSON and Markdown artifacts are written to
+`artifacts/tool-protocol-v1/`. This benchmark validates the runtime protocol
+and provider adapters; it does not measure model quality or live API success.

@@ -1,5 +1,6 @@
 from .cli import build_agent, build_arg_parser, build_welcome, main
 from .providers.clients import AnthropicCompatibleModelClient, FakeModelClient, OllamaModelClient, OpenAICompatibleModelClient
+from .providers.tool_calls import ModelCompletion, ToolCall
 from .plan import PlanState, PlanTask
 from .runtime import Pico, SessionStore
 from .skills import SkillRegistry, SkillSpec
@@ -23,6 +24,8 @@ __all__ = [
     "main",
     "OllamaModelClient",
     "OpenAICompatibleModelClient",
+    "ModelCompletion",
+    "ToolCall",
     "PlanState",
     "PlanTask",
     "SessionStore",

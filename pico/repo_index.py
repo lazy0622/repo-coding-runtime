@@ -20,7 +20,10 @@ from .workspace import IGNORED_PATH_NAMES
 
 
 MAX_INDEX_FILE_BYTES = 2 * 1024 * 1024
-INDEX_SCHEMA_VERSION = "repo-index-v2"
+# The cache filename remains v2 for backwards compatibility with existing
+# workspaces and review artifacts.  The payload schema is v3 and invalidates
+# older records before loading them.
+INDEX_SCHEMA_VERSION = "repo-index-v3"
 LANGUAGE_BY_SUFFIX = {
     ".py": "python",
     ".java": "java",
@@ -67,6 +70,50 @@ class SymbolRecord:
         )
 
 
+@dataclass(frozen=True)
+class CallRecord:
+    """A bounded, explainable static call observation.
+
+    ``resolved_symbol`` is intentionally optional: Python's dynamic dispatch
+    means that an AST can observe ``obj.run()`` without proving the runtime
+    type of ``obj``.  Consumers must inspect ``resolution`` and ``confidence``.
+    """
+
+    caller_symbol: str
+    callee_text: str
+    resolved_symbol: str = ""
+    path: str = ""
+    line: int = 1
+    column: int = 0
+    confidence: float = 0.0
+    resolution: str = "unresolved"
+
+    def to_dict(self):
+        return {
+            "caller_symbol": self.caller_symbol,
+            "callee_text": self.callee_text,
+            "resolved_symbol": self.resolved_symbol,
+            "path": self.path,
+            "line": self.line,
+            "column": self.column,
+            "confidence": self.confidence,
+            "resolution": self.resolution,
+        }
+
+    @classmethod
+    def from_dict(cls, value):
+        return cls(
+            caller_symbol=str(value.get("caller_symbol", "module")),
+            callee_text=str(value.get("callee_text", "")),
+            resolved_symbol=str(value.get("resolved_symbol", "")),
+            path=str(value.get("path", "")),
+            line=int(value.get("line", 1)),
+            column=int(value.get("column", 0)),
+            confidence=float(value.get("confidence", 0.0) or 0.0),
+            resolution=str(value.get("resolution", "unresolved")),
+        )
+
+
 @dataclass
 class FileRecord:
     path: str
@@ -74,6 +121,7 @@ class FileRecord:
     fingerprint: str
     size: int
     symbols: tuple[SymbolRecord, ...] = ()
+    calls: tuple[CallRecord, ...] = ()
     imports: tuple[str, ...] = ()
     diagnostics: tuple[str, ...] = ()
     source_lines: tuple[str, ...] = ()
@@ -85,6 +133,7 @@ class FileRecord:
             "language": self.language,
             "size": self.size,
             "symbols": [symbol.to_dict() for symbol in self.symbols],
+            "calls": [call.to_dict() for call in self.calls],
             "imports": list(self.imports),
             "diagnostics": list(self.diagnostics),
         }
@@ -107,6 +156,7 @@ class FileRecord:
             fingerprint=str(value.get("fingerprint", "")),
             size=int(value.get("size", 0)),
             symbols=tuple(SymbolRecord.from_dict(item) for item in value.get("symbols", [])),
+            calls=tuple(CallRecord.from_dict(item) for item in value.get("calls", [])),
             imports=tuple(str(item) for item in value.get("imports", [])),
             diagnostics=tuple(str(item) for item in value.get("diagnostics", [])),
             source_lines=tuple(str(item) for item in value.get("source_lines", [])),
@@ -169,6 +219,61 @@ class _ImportVisitor(ast.NodeVisitor):
         prefix = "." * int(getattr(node, "level", 0))
         module = node.module or ""
         self.imports.add(prefix + module)
+
+
+class _CallVisitor(ast.NodeVisitor):
+    """Collect calls with the lexical function/method that made them."""
+
+    def __init__(self):
+        self.calls: list[CallRecord] = []
+        self.scope: list[str] = []
+        self.scope_kinds: list[str] = []
+
+    @property
+    def caller_symbol(self):
+        return ".".join(self.scope) if self.scope else "module"
+
+    @staticmethod
+    def _callee_text(node):
+        try:
+            return ast.unparse(node)
+        except (AttributeError, ValueError):
+            if isinstance(node, ast.Name):
+                return node.id
+            if isinstance(node, ast.Attribute):
+                return node.attr
+            return "<dynamic>"
+
+    def visit_ClassDef(self, node):
+        self.scope.append(node.name)
+        self.scope_kinds.append("class")
+        self.generic_visit(node)
+        self.scope.pop()
+        self.scope_kinds.pop()
+
+    def _visit_function(self, node):
+        self.scope.append(node.name)
+        self.scope_kinds.append("function")
+        self.generic_visit(node)
+        self.scope.pop()
+        self.scope_kinds.pop()
+
+    def visit_FunctionDef(self, node):
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node):
+        self._visit_function(node)
+
+    def visit_Call(self, node):
+        self.calls.append(
+            CallRecord(
+                caller_symbol=self.caller_symbol,
+                callee_text=self._callee_text(node.func),
+                line=int(getattr(node, "lineno", 1)),
+                column=int(getattr(node, "col_offset", 0)),
+            )
+        )
+        self.generic_visit(node)
 
 
 class RepoIndex:
@@ -264,6 +369,7 @@ class RepoIndex:
                 language=language,
                 fingerprint=f"size:{size}",
                 size=size,
+                calls=(),
                 diagnostics=(f"file exceeds index limit ({MAX_INDEX_FILE_BYTES} bytes)",),
             )
 
@@ -275,6 +381,7 @@ class RepoIndex:
                 language=language,
                 fingerprint=f"decode-error:{signature}",
                 size=size,
+                calls=(),
                 diagnostics=(f"decode error: {exc}",),
             )
         except OSError as exc:
@@ -283,6 +390,7 @@ class RepoIndex:
                 language=language,
                 fingerprint=f"read-error:{signature}",
                 size=size,
+                calls=(),
                 diagnostics=(f"read error: {exc}",),
             )
 
@@ -295,6 +403,7 @@ class RepoIndex:
                 language=language,
                 fingerprint=fingerprint,
                 size=size,
+                calls=(),
                 symbols=tuple(symbols),
                 imports=tuple(sorted(imports)),
                 diagnostics=("heuristic structural index; verify with compiler or language server",),
@@ -310,6 +419,7 @@ class RepoIndex:
                 language=language,
                 fingerprint=fingerprint,
                 size=size,
+                calls=(),
                 diagnostics=(diagnostic,),
                 source_lines=source_lines,
             )
@@ -318,6 +428,8 @@ class RepoIndex:
         symbol_visitor.visit(tree)
         import_visitor = _ImportVisitor()
         import_visitor.visit(tree)
+        call_visitor = _CallVisitor()
+        call_visitor.visit(tree)
         symbols = tuple(
             sorted(
                 symbol_visitor.symbols,
@@ -330,6 +442,19 @@ class RepoIndex:
             fingerprint=fingerprint,
             size=size,
             symbols=symbols,
+            calls=tuple(
+                CallRecord(
+                    caller_symbol=item.caller_symbol,
+                    callee_text=item.callee_text,
+                    path=relative_path,
+                    line=item.line,
+                    column=item.column,
+                )
+                for item in sorted(
+                    call_visitor.calls,
+                    key=lambda item: (item.line, item.column, item.callee_text),
+                )
+            ),
             imports=tuple(sorted(item for item in import_visitor.imports if item)),
             source_lines=source_lines,
             tree=tree,
@@ -594,6 +719,374 @@ class RepoIndex:
             "files": files,
             "edges": sorted(edges, key=lambda item: (item["from"], item["to"], item["import"])),
             "count": len(files),
+        }
+
+    @staticmethod
+    def _symbol_key(path, qualified_name):
+        return f"{path}:{qualified_name}"
+
+    @staticmethod
+    def _module_name(path):
+        value = Path(path).with_suffix("")
+        parts = list(value.parts)
+        if parts and parts[-1] == "__init__":
+            parts.pop()
+        return ".".join(parts)
+
+    @classmethod
+    def _symbol_entries(cls, records):
+        entries = []
+        for record in records:
+            for symbol in record.symbols:
+                entries.append(
+                    {
+                        "key": cls._symbol_key(record.path, symbol.qualified_name),
+                        "path": record.path,
+                        "module": cls._module_name(record.path),
+                        "symbol": symbol,
+                    }
+                )
+        return entries
+
+    @classmethod
+    def _resolve_call(cls, record, call, entries):
+        """Resolve only cases for which the evidence is explainable."""
+
+        callee = str(call.callee_text or "").strip()
+        terminal = callee.rsplit(".", 1)[-1]
+        name_matches = [item for item in entries if item["symbol"].name == terminal]
+        qualified_matches = []
+        if "." in callee:
+            same_module_prefix = f"{cls._module_name(record.path)}."
+            qualified_matches = [
+                item
+                for item in name_matches
+                if item["symbol"].qualified_name == callee
+                or item["module"] + "." + item["symbol"].qualified_name == callee
+                or item["module"] + "." + item["symbol"].qualified_name == same_module_prefix + callee
+            ]
+        candidates = qualified_matches or name_matches
+        if len(qualified_matches) == 1:
+            item = qualified_matches[0]
+            return CallRecord(
+                caller_symbol=call.caller_symbol,
+                callee_text=call.callee_text,
+                resolved_symbol=item["key"],
+                path=record.path,
+                line=call.line,
+                column=call.column,
+                confidence=1.0,
+                resolution="exact",
+            )
+        if len(candidates) == 1:
+            item = candidates[0]
+            return CallRecord(
+                caller_symbol=call.caller_symbol,
+                callee_text=call.callee_text,
+                resolved_symbol=item["key"],
+                path=record.path,
+                line=call.line,
+                column=call.column,
+                confidence=0.75,
+                resolution="unique_name",
+            )
+        return CallRecord(
+            caller_symbol=call.caller_symbol,
+            callee_text=call.callee_text,
+            path=record.path,
+            line=call.line,
+            column=call.column,
+            confidence=0.0,
+            resolution="ambiguous" if len(candidates) > 1 else "unresolved",
+        )
+
+    @classmethod
+    def _resolved_calls(cls, records):
+        entries = cls._symbol_entries(records)
+        return [
+            cls._resolve_call(record, call, entries)
+            for record in records
+            for call in record.calls
+        ]
+
+    @staticmethod
+    def _call_to_dict(call):
+        return call.to_dict()
+
+    @staticmethod
+    def _definition_to_dict(entry):
+        return {"path": entry["path"], **entry["symbol"].to_dict()}
+
+    @staticmethod
+    def _bounded_items(items, limit=50):
+        items = list(items)
+        return items[:limit], max(0, len(items) - limit)
+
+    @staticmethod
+    def _call_identity(call):
+        return (
+            call.path,
+            call.line,
+            call.column,
+            call.caller_symbol,
+            call.callee_text,
+            call.resolved_symbol,
+        )
+
+    @classmethod
+    def _walk_call_edges(cls, calls, entries, start_keys, direction, depth):
+        """Walk only resolved edges, keeping the result deterministic and bounded."""
+
+        entry_keys = {item["key"] for item in entries}
+        frontier = set(start_keys) & entry_keys
+        seen = set()
+        collected = []
+        for _ in range(depth):
+            if not frontier:
+                break
+            if direction == "callers":
+                matches = [call for call in calls if call.resolved_symbol in frontier]
+                next_frontier = {
+                    f"{call.path}:{call.caller_symbol}"
+                    for call in matches
+                    if call.caller_symbol != "module"
+                }
+            else:
+                matches = [
+                    call
+                    for call in calls
+                    if f"{call.path}:{call.caller_symbol}" in frontier
+                ]
+                next_frontier = {
+                    call.resolved_symbol
+                    for call in matches
+                    if call.resolved_symbol
+                }
+            for call in sorted(
+                matches,
+                key=lambda item: (
+                    item.path,
+                    item.line,
+                    item.column,
+                    item.caller_symbol,
+                    item.callee_text,
+                ),
+            ):
+                identity = cls._call_identity(call)
+                if identity not in seen:
+                    seen.add(identity)
+                    collected.append(call)
+            frontier = next_frontier & entry_keys
+        return collected
+
+    def _target_entries(self, target, path, records):
+        target = str(target or "").strip()
+        entries = self._symbol_entries(records)
+        scope_path = str(path or ".").replace("\\", "/").strip("/") or "."
+        if scope_path != ".":
+            entries = [
+                item
+                for item in entries
+                if item["path"] == scope_path
+                or item["path"].startswith(scope_path.rstrip("/") + "/")
+            ]
+        target_path = None
+        try:
+            candidate = Path(target)
+            if not candidate.is_absolute():
+                candidate = self.root / candidate
+            if candidate.exists():
+                target_path = self._relative(candidate)
+        except (OSError, ValueError):
+            target_path = None
+        if target_path is not None:
+            prefix = target_path.rstrip("/")
+            return [item for item in entries if item["path"] == prefix or item["path"].startswith(prefix + "/")]
+        terminal = target.rsplit(".", 1)[-1]
+        return [
+            item
+            for item in entries
+            if item["symbol"].name == terminal
+            or item["symbol"].qualified_name == target
+            or item["symbol"].qualified_name.endswith("." + target)
+        ]
+
+    def call_graph(self, symbol="", path=".", direction="both", depth=1):
+        """Return a bounded, best-effort Python call graph.
+
+        This is a navigation aid, not a compiler or language-server result.
+        ``confidence`` is attached to every edge so callers can keep uncertain
+        dynamic dispatch visible instead of silently treating it as fact.
+        """
+
+        direction = str(direction or "both").lower()
+        if direction not in {"callers", "callees", "both"}:
+            raise ValueError("direction must be callers, callees, or both")
+        depth = int(depth)
+        if depth < 1 or depth > 2:
+            raise ValueError("depth must be in [1, 2]")
+        records = self._records_for(".")
+        target_entries = self._target_entries(symbol, path, records) if str(symbol).strip() else []
+        target_keys = {item["key"] for item in target_entries}
+        calls = self._resolved_calls(records)
+        entries = self._symbol_entries(records)
+        callers = self._walk_call_edges(calls, entries, target_keys, "callers", depth)
+        target_callers = {
+            item["path"] + ":" + item["symbol"].qualified_name
+            for item in target_entries
+        }
+        callees = self._walk_call_edges(calls, entries, target_callers, "callees", depth)
+        caller_items, caller_truncated = self._bounded_items(
+            [self._call_to_dict(item) for item in callers]
+        )
+        callee_items, callee_truncated = self._bounded_items(
+            [self._call_to_dict(item) for item in callees]
+        )
+        diagnostics = [
+            f"{record.path}: {item}"
+            for record in records
+            for item in record.diagnostics
+        ]
+        unresolved = sum(1 for call in calls if call.resolution in {"unresolved", "ambiguous"})
+        return {
+            "schema_version": "repo-index-v3-call-graph-v1",
+            "query": str(symbol),
+            "path": str(path),
+            "direction": direction,
+            "depth": depth,
+            "definitions": [self._definition_to_dict(item) for item in target_entries[:50]],
+            "callers": caller_items if direction in {"callers", "both"} else [],
+            "callees": callee_items if direction in {"callees", "both"} else [],
+            "confidence": 0.75 if target_entries else 0.0,
+            "unresolved_call_count": unresolved,
+            "diagnostics": sorted(set(diagnostics + [
+                "Python calls are resolved conservatively; dynamic dispatch may remain unresolved."
+            ])),
+            "truncated": {
+                "callers": caller_truncated,
+                "callees": callee_truncated,
+            },
+        }
+
+    def analyze_impact(self, target, path=".", depth=1):
+        """Find likely callers, importers and tests affected by a target."""
+
+        depth = int(depth)
+        if depth < 1 or depth > 2:
+            raise ValueError("depth must be in [1, 2]")
+        records = self._records_for(".")
+        entries = self._target_entries(target, path, records)
+        target_keys = {item["key"] for item in entries}
+        target_paths = {item["path"] for item in entries}
+        calls = self._resolved_calls(records)
+        all_entries = self._symbol_entries(records)
+        direct_callers = self._walk_call_edges(calls, all_entries, target_keys, "callers", 1)
+        callers = self._walk_call_edges(calls, all_entries, target_keys, "callers", depth)
+        target_callers = {
+            item["path"] + ":" + item["symbol"].qualified_name
+            for item in entries
+        }
+        direct_callees = self._walk_call_edges(calls, all_entries, target_callers, "callees", 1)
+        callees = self._walk_call_edges(calls, all_entries, target_callers, "callees", depth)
+
+        module_map = self._module_map(records)
+        reverse_importers = []
+        related_tests = []
+        target_modules = {
+            self._module_name(item["path"])
+            for item in entries
+        }
+        target_names = {
+            item["symbol"].name
+            for item in entries
+        }
+        for record in records:
+            internal_targets = []
+            for imported in record.imports:
+                resolved = self._resolve_import(record.path, imported, module_map)
+                if resolved in target_paths or self._module_name(resolved or "") in target_modules:
+                    internal_targets.append(resolved or imported)
+            if internal_targets:
+                reverse_importers.append(
+                    {
+                        "path": record.path,
+                        "imports": sorted(set(internal_targets)),
+                        "confidence": 0.9,
+                        "reason": "internal_import",
+                    }
+                )
+
+            if record.path.startswith("tests/") or Path(record.path).name.startswith("test_"):
+                source = "\n".join(record.source_lines)
+                name_hit = any(re.search(rf"\b{re.escape(name)}\b", source) for name in target_names)
+                module_hit = any(module and module in source for module in target_modules)
+                if name_hit or module_hit or internal_targets:
+                    related_tests.append(
+                        {
+                            "path": record.path,
+                            "confidence": 0.65 if name_hit else 0.8,
+                            "reason": "symbol_or_module_reference",
+                        }
+                    )
+
+        caller_items, caller_truncated = self._bounded_items([self._call_to_dict(item) for item in callers])
+        callee_items, callee_truncated = self._bounded_items([self._call_to_dict(item) for item in callees])
+        direct_caller_items, direct_caller_truncated = self._bounded_items(
+            [self._call_to_dict(item) for item in direct_callers]
+        )
+        direct_callee_items, direct_callee_truncated = self._bounded_items(
+            [self._call_to_dict(item) for item in direct_callees]
+        )
+        indirect_caller_items = [item for item in caller_items if item not in direct_caller_items]
+        indirect_callee_items = [item for item in callee_items if item not in direct_callee_items]
+        importer_items, importer_truncated = self._bounded_items(reverse_importers)
+        test_items, test_truncated = self._bounded_items(related_tests)
+        candidate_files = sorted(
+            set(target_paths)
+            | {item["path"] for item in caller_items}
+            | {item["path"] for item in callee_items}
+            | {item["path"] for item in importer_items}
+            | {item["path"] for item in test_items}
+        )
+        candidate_files, candidate_truncated = self._bounded_items(candidate_files)
+        diagnostics = [
+            f"{record.path}: {item}"
+            for record in records
+            for item in record.diagnostics
+        ]
+        diagnostics.append(
+            "Impact analysis is conservative navigation evidence; inspect source and run tests before editing."
+        )
+        if not entries:
+            diagnostics.append("target was not resolved to an indexed symbol or file")
+        confidences = [item["confidence"] for item in caller_items + callee_items]
+        confidences.extend(item["confidence"] for item in importer_items + test_items)
+        confidence = round(sum(confidences) / len(confidences), 2) if confidences else (0.0 if not entries else 0.5)
+        return {
+            "schema_version": "repo-index-v3-impact-v1",
+            "target": str(target),
+            "path": str(path),
+            "depth": depth,
+            "definitions": [self._definition_to_dict(item) for item in entries[:50]],
+            "direct_callers": direct_caller_items,
+            "direct_callees": direct_callee_items,
+            "indirect_callers": indirect_caller_items,
+            "indirect_callees": indirect_callee_items,
+            "reverse_importers": importer_items,
+            "related_tests": test_items,
+            "candidate_files": candidate_files,
+            "confidence": confidence,
+            "unresolved_call_count": sum(1 for call in calls if call.resolution in {"unresolved", "ambiguous"}),
+            "diagnostics": sorted(set(diagnostics)),
+            "truncated": {
+                "direct_callers": direct_caller_truncated,
+                "direct_callees": direct_callee_truncated,
+                "all_callers": caller_truncated,
+                "all_callees": callee_truncated,
+                "reverse_importers": importer_truncated,
+                "related_tests": test_truncated,
+                "candidate_files": candidate_truncated,
+            },
         }
 
     def changed_files(self):

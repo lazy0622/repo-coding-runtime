@@ -36,6 +36,7 @@ READ_ONLY_SUBAGENT_TOOLS = (
     "find_symbol",
     "find_references",
     "get_dependency_graph",
+    "analyze_impact",
     "get_changed_files",
     "preview_diff",
 )
@@ -184,6 +185,7 @@ class SubAgentManager:
             max_verification_attempts=0,
             allowed_tools=WRITE_SUBAGENT_TOOLS if writable else READ_ONLY_SUBAGENT_TOOLS,
             task_mode="edit" if writable else "inspect",
+            sandbox_config=self.agent.sandbox_config,
         )
 
     @staticmethod
@@ -276,7 +278,9 @@ class SubAgentManager:
                 "fallback_reason": locals().get("fallback_reason", ""),
             }
         finally:
-            if child is not None and not timed_out:
+            if child is not None:
+                # Docker-backed children must be closed even after a timeout;
+                # otherwise the timed-out container would outlive the task.
                 child.close()
             if lease is not None and not writable:
                 try:

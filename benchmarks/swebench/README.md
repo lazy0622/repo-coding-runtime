@@ -51,3 +51,34 @@ Mount the source read-only, mount `artifacts/` read-write, and pass provider
 secrets with `--env-file .env`. The adapter initializes one bare cache per
 repository and shallow-fetches each pinned `base_commit`; it does not mirror all
 remote refs.
+
+## V4 fixed generation matrix
+
+`scripts/run_swebench_matrix.py` adds a reproducible matrix around the
+adapter. It requires the pre-registered selection plus its resolved manifest,
+keeps the model/budget/sandbox/instance IDs fixed, and can compare
+`ExecutionPolicy` with `--mode both`:
+
+```powershell
+python scripts/run_swebench_matrix.py `
+  --selection benchmarks/swebench/development-v1-selection.json `
+  --manifest artifacts/swebench-development-v1/instances.jsonl `
+  --mode both `
+  --repetitions 1 `
+  --generate-only `
+  --agent-command-json '["python","-m","pico","--provider","deepseek","--approval","auto","--task-mode","edit","--max-new-tokens","4096","{problem_statement}"]' `
+  --output-dir artifacts/swebench/results/v4-pilot
+```
+
+Use `--repetitions 3` for the separate formal run; do not pool it with the
+pilot. The matrix writes `generation_metrics`, per-instance process metrics,
+`policy_ablation.json/.md`, and a `failures/` directory. `--resume` reuses
+completed mode/repetition summaries.
+
+Official grading is intentionally a second step. After the official Docker
+harness produces its result artifact, parse it with `--grade-only
+--official-results <path>`. The parser is the only source of
+`official_resolved` and `official_resolved_rate`; an agent exit code, a
+non-empty patch, or a local verifier pass is never presented as solve rate.
+See [`docs/evaluation/swebench-methodology.md`](../../docs/evaluation/swebench-methodology.md)
+for the full pilot/formal protocol.

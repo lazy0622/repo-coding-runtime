@@ -47,6 +47,8 @@ docs/*
 !docs/review-pack/README.md
 !docs/architecture/
 !docs/architecture/agent-harness-v1-overview.md
+!docs/evaluation/
+!docs/evaluation/*.md
 
 # OS files
 .DS_Store

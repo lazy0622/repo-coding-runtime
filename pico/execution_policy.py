@@ -26,6 +26,9 @@ DISCOVERY_TOOLS = {
     "get_file_outline",
     "find_symbol",
     "find_references",
+    "get_dependency_graph",
+    "get_changed_files",
+    "analyze_impact",
     "repo_index_status",
 }
 EDIT_TOOLS = {"write_file", "patch_file", "apply_patch", "rollback_patch", "run_coding_workflow"}
@@ -109,7 +112,9 @@ class ExecutionPolicy:
             f"budgets explore={config.explore_budget}, diagnose={config.diagnose_budget}, "
             f"first_edit_deadline={config.first_edit_deadline}, verify={config.verification_budget}, "
             f"repair={config.repair_attempts}. Use <blocked>{{\"reason\":...,\"evidence\":[],"
-            "\"required_input\":...}</blocked> when safe completion is impossible."
+            "\"required_input\":...}</blocked> when safe completion is impossible. "
+            "Before changing a cross-file symbol, prefer analyze_impact as bounded navigation evidence; "
+            "confirm its confidence against source and tests."
         )
 
     @staticmethod

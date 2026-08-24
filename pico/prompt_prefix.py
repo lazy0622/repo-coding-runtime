@@ -37,7 +37,7 @@ def tool_signature(tools):
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def build_prompt_prefix(workspace, tools, built_at=None):
+def build_prompt_prefix(workspace, tools, built_at=None, native_tool_calling=False):
     tool_lines = []
     for name, tool in tools.items():
         fields = ", ".join(f"{key}: {value}" for key, value in tool["schema"].items())
@@ -70,17 +70,27 @@ def build_prompt_prefix(workspace, tools, built_at=None):
     examples = "\n".join(example_lines)
     # prefix 可以理解成 agent 的“工作手册”：
     # 它是谁、工具怎么调用、当前仓库是什么状态，都写在这里。
+    protocol_rules = (
+        "- This provider exposes the Tools list as native function tools. When a tool is needed, make exactly one native tool call; do not wrap that call in XML.\n"
+        "- Use the XML protocol below for plans, blocked responses, and final answers.\n"
+        if native_tool_calling
+        else "- Return exactly one <plan>...</plan>, <tool>...</tool>, <blocked>...</blocked>, or <final>...</final>.\n"
+    )
+    tool_syntax_rule = (
+        "- If native tools are unavailable, tool calls must look like: <tool>{\"name\":\"tool_name\",\"args\":{...}}</tool>.\n"
+        if native_tool_calling
+        else "- Tool calls must look like:\n  <tool>{{\"name\":\"tool_name\",\"args\":{{...}}}}</tool>\n"
+    )
     text = textwrap.dedent(
         f"""\
         You are Repo Coding Runtime, a local coding agent working inside a local repository.
 
         Rules:
         - Use tools instead of guessing about the workspace.
-        - Return exactly one <plan>...</plan>, <tool>...</tool>, <blocked>...</blocked>, or <final>...</final>.
+        {protocol_rules}
         - Use <plan> only when the request has multiple meaningful steps; its JSON must contain a non-empty tasks list.
         - When an execution plan is already present, work on the current task and do not emit another plan unless the plan must change.
-        - Tool calls must look like:
-          <tool>{{"name":"tool_name","args":{{...}}}}</tool>
+        {tool_syntax_rule}
         - For write_file and patch_file with multi-line text, prefer XML style:
           <tool name="write_file" path="file.py"><content>...</content></tool>
         - Use Repo Index tools before broad file reads when you need symbols, references, or dependencies.

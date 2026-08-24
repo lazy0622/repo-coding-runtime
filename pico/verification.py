@@ -6,7 +6,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 
-from .command_runner import run_shell_command
+from .sandbox import HostExecutionBackend
 from .security import classify_shell_command, shell_env
 from .workspace import now
 
@@ -29,6 +29,11 @@ class VerificationResult:
     reason: str = ""
     risk_level: str = "low"
     created_at: str = ""
+    execution_backend: str = "host"
+    sandbox_mode: str = "host"
+    timeout_killed: bool = False
+    oom_killed: bool = False
+    resource_limit_reason: str = ""
 
     @property
     def passed(self):
@@ -47,10 +52,15 @@ class VerificationResult:
             "reason": self.reason,
             "risk_level": self.risk_level,
             "created_at": self.created_at,
+            "execution_backend": self.execution_backend,
+            "sandbox_mode": self.sandbox_mode,
+            "timeout_killed": self.timeout_killed,
+            "oom_killed": self.oom_killed,
+            "resource_limit_reason": self.resource_limit_reason,
         }
 
 
-def run_verification(root, command, timeout=60, env=None):
+def run_verification(root, command, timeout=60, env=None, execution_backend=None):
     """Run an explicitly configured verifier in the workspace.
 
     The command is never inferred from arbitrary model text.  It must be
@@ -75,12 +85,14 @@ def run_verification(root, command, timeout=60, env=None):
 
     started_at = time.monotonic()
     try:
-        result = run_shell_command(
+        backend = execution_backend or HostExecutionBackend()
+        result = backend.run(
             command,
             cwd=root,
             timeout=max(1, int(timeout)),
             env=env or shell_env(root=root),
         )
+        timed_out = bool(getattr(result, "timeout_killed", False))
         return VerificationResult(
             status=VERIFY_PASSED if result.returncode == 0 else VERIFY_FAILED,
             command=command,
@@ -88,10 +100,15 @@ def run_verification(root, command, timeout=60, env=None):
             stdout=str(result.stdout or ""),
             stderr=str(result.stderr or ""),
             duration_ms=int((time.monotonic() - started_at) * 1000),
-            error_code="" if result.returncode == 0 else "verification_failed",
-            reason="exit_code_zero" if result.returncode == 0 else "non_zero_exit_code",
+            error_code="" if result.returncode == 0 else ("verification_timeout" if timed_out else "verification_failed"),
+            reason="exit_code_zero" if result.returncode == 0 else ("timeout" if timed_out else "non_zero_exit_code"),
             risk_level=policy["risk_level"],
             created_at=now(),
+            execution_backend=str(getattr(result, "execution_backend", "host")),
+            sandbox_mode=str(getattr(result, "sandbox_mode", "host")),
+            timeout_killed=timed_out,
+            oom_killed=bool(getattr(result, "oom_killed", False)),
+            resource_limit_reason=str(getattr(result, "resource_limit_reason", "")),
         )
     except subprocess.TimeoutExpired as exc:
         return VerificationResult(

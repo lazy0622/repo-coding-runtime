@@ -1462,8 +1462,14 @@ def _apply_recovery_setup(agent, task, workspace_root):
     agent.session["memory"] = agent.memory.to_dict()
 
     if setup == "checkpoint_resume":
+        # A clean resume fixture must carry the current file fingerprint.  A
+        # missing freshness value is intentionally used by the stale fixtures
+        # below; using it here would turn the happy-path checkpoint case into
+        # an accidental partial-stale case.
+        agent.memory.set_file_summary("sample.txt", "sample.txt: cached resume summary")
         agent.memory.remember_file("sample.txt")
         agent.session["memory"] = agent.memory.to_dict()
+        sample_freshness = agent.memory.to_dict()["file_summaries"]["sample.txt"]["freshness"]
         agent.session["checkpoints"] = {
             "current_id": "ckpt_resume",
             "items": {
@@ -1477,15 +1483,13 @@ def _apply_recovery_setup(agent, task, workspace_root):
                     "excluded": [],
                     "current_blocker": "",
                     "next_step": "Apply the locked change" if task["id"] == "checkpoint_resume_goal" else "Continue from remembered file anchors",
-                    "key_files": [{"path": "sample.txt", "freshness": None}],
-                    "freshness": {},
+                    "key_files": [{"path": "sample.txt", "freshness": sample_freshness}],
+                    "freshness": {"sample.txt": sample_freshness},
                     "summary": "checkpoint resume benchmark",
                     "runtime_identity": {"workspace_fingerprint": agent.workspace.fingerprint()},
                 }
             },
         }
-        if task["id"] == "checkpoint_resume_files":
-            agent.session["checkpoints"]["items"]["ckpt_resume"]["key_files"] = [{"path": "sample.txt", "freshness": None}]
         agent.session_store.save(agent.session)
         return
 
@@ -1661,6 +1665,7 @@ def run_context_ablation_v2(artifact_path=DEFAULT_CONTEXT_ABLATION_V2_PATH, repe
         "schema_version": METRICS_SCHEMA_VERSION,
         "artifact_type": "context-ablation-v2",
         "captured_at": datetime.utcnow().isoformat() + "Z",
+        "repetitions": int(repetitions),
         "config_count": payload["config_count"],
         "configs": payload["configs"],
         "summary": payload["summary"],
@@ -1674,6 +1679,7 @@ def run_memory_ablation_v2(artifact_path=DEFAULT_MEMORY_ABLATION_V2_PATH, repeti
         "schema_version": METRICS_SCHEMA_VERSION,
         "artifact_type": "memory-ablation-v2",
         "captured_at": datetime.utcnow().isoformat() + "Z",
+        "repetitions": int(repetitions),
         "task_count": payload["task_count"],
         "runs_per_variant": payload["runs_per_variant"],
         "category_counts": payload["category_counts"],
@@ -1694,6 +1700,7 @@ def run_recovery_ablation_v2(artifact_path=DEFAULT_RECOVERY_ABLATION_V2_PATH, re
         "schema_version": METRICS_SCHEMA_VERSION,
         "artifact_type": "recovery-ablation-v2",
         "captured_at": datetime.utcnow().isoformat() + "Z",
+        "repetitions": int(repetitions),
         "task_count": len(RECOVERY_ABLATION_TASKS),
         "variants": {
             variant: {
