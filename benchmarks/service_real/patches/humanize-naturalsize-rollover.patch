@@ -1,0 +1,18 @@
+diff --git a/src/humanize/filesize.py b/src/humanize/filesize.py
+index c495fed..4b5f23a 100644
+--- a/src/humanize/filesize.py
++++ b/src/humanize/filesize.py
+@@ -98,5 +98,11 @@ def naturalsize(
+ 
+     exp = int(min(log(abs_bytes, base), len(suffix)))
+     space = "" if gnu else " "
+-    ret: str = format % (bytes_ / (base**exp)) + space + _(suffix[exp - 1])
+-    return ret
++    while True:
++        scaled = bytes_ / (base**exp)
++        ret = format % scaled + space + _(suffix[exp - 1])
++        # If rounding pushed the value up to the next unit, carry over.
++        if exp < len(suffix) and abs(float(format % scaled)) >= base:
++            exp += 1
++            continue
++        return ret

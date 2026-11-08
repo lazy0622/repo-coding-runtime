@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "tier": "curated_historical_real_repository_validation_not_swebench",
+  "cases": [
+    {
+      "id": "humanize-intcomma-large-int",
+      "repository": "https://github.com/python-humanize/humanize.git",
+      "fix_commit": "984526c02448110a8392dde3f5e26096dfd7c729",
+      "source_url": "https://github.com/python-humanize/humanize/pull/392",
+      "regression_files": ["tests/test_number.py"],
+      "task": "humanize.intcomma raises OverflowError for native Python integers larger than the float range, for example 10**400 + 123 and its negative. Support comma formatting of arbitrary-size Python integers without converting them to float. Preserve existing behavior for ordinary integers, numeric strings, floats and non-finite values. Make a minimal source change. Source checkout includes generated version metadata solely for importability."
+    },
+    {
+      "id": "humanize-fractional-whole",
+      "repository": "https://github.com/python-humanize/humanize.git",
+      "fix_commit": "08cf2c3026cfd7c553e397e1d91ea069eb2a4978",
+      "source_url": "https://github.com/python-humanize/humanize/pull/354",
+      "regression_files": ["tests/test_number.py"],
+      "task": "humanize.fractional emits degenerate fractions when a value is zero or the fractional part rounds to a whole at the existing denominator limit. Zero should render as 0, values such as 2.9999999 and -2.9999999 should render as 3 and -3 rather than mixed fractions ending in 1/1. Preserve ordinary positive/negative fractions and existing precision policy. Make a minimal source change."
+    },
+    {
+      "id": "humanize-naturalsize-rollover",
+      "repository": "https://github.com/python-humanize/humanize.git",
+      "fix_commit": "823ad6096e1e5ba82ea876ce761fc2efebd76157",
+      "source_url": "https://github.com/python-humanize/humanize/pull/329",
+      "regression_files": ["tests/test_filesize.py"],
+      "task": "humanize.naturalsize chooses a unit before formatting, so rounding near the next unit can produce 1000.0 kB or 1024.0 KiB. For example 999999 bytes with the default format should be 1.0 MB, and 1024**2-1 in binary mode should be 1.0 MiB. Carry into the next available unit when formatted rounding reaches the current base. Preserve GNU mode, negative values, custom precision, normal values and the largest available suffix. Make a minimal source change."
+    },
+    {
+      "id": "itsdangerous-future-timestamp",
+      "repository": "https://github.com/pallets/itsdangerous.git",
+      "fix_commit": "c30678d19e37011890e2374cca04f7789e101793",
+      "source_url": "https://github.com/pallets/itsdangerous/commit/c30678d19e37011890e2374cca04f7789e101793",
+      "regression_files": ["tests/test_itsdangerous/test_timed.py", "tests/test_itsdangerous/test_signer.py"],
+      "task": "TimestampSigner.unsign accepts signatures from the future when max_age is set, because a negative age does not exceed the maximum. Reject such signatures with SignatureExpired, preserving payload and date_signed exception attributes. Normal unexpired signatures must still verify and signatures older than max_age must still expire. Preserve behavior when max_age is not supplied. Make a minimal source change."
+    },
+    {
+      "id": "itsdangerous-none-salt",
+      "repository": "https://github.com/pallets/itsdangerous.git",
+      "fix_commit": "41ec419632aae3533ff12838044eeddd9cd1311f",
+      "source_url": "https://github.com/pallets/itsdangerous/commit/41ec419632aae3533ff12838044eeddd9cd1311f",
+      "regression_files": ["tests/test_itsdangerous/test_signer.py"],
+      "task": "Signer(secret_key, salt=None) regressed: signing fails instead of treating None as the default salt b'itsdangerous.Signer'. Restore None/default-salt equivalence across supported key derivations, preserve explicit string/bytes salts and normal sign/unsign behavior, and keep the optional salt type annotation accurate. Make a minimal source change."
+    }
+  ]
+}
