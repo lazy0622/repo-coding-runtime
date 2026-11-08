@@ -9,6 +9,15 @@ description = "Evidence-driven local coding agent runtime for repository tasks"
 requires-python = ">=3.10"
 dependencies = []
 
+[project.optional-dependencies]
+service = [
+  "fastapi==0.115.12",
+  "uvicorn==0.34.1",
+  "SQLAlchemy==2.0.40",
+  "psycopg[binary]==3.2.6",
+  "python-dotenv==1.0.0",
+]
+
 [project.scripts]
 pico = "pico.cli:main"
 repo = "pico.cli:main"
@@ -21,6 +30,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["pico*"]
+
+[tool.setuptools.package-data]
+"pico.service" = ["workbench.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

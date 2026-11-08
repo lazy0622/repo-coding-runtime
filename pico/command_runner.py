@@ -70,8 +70,11 @@ def _portable_python_argv(command: str) -> list[str] | None:
     # ``python3`` is common in portable benchmark definitions but is not
     # always registered as a Windows executable.  Use the current interpreter
     # when the requested alias cannot be resolved.
-    if argv[0].lower() in {"python3", "python3.exe"} and shutil.which(argv[0]) is None:
-        argv[0] = sys.executable
+    if argv[0].lower() in {"python3", "python3.exe"}:
+        resolved = shutil.which(argv[0])
+        store_alias = resolved and "/microsoft/windowsapps/" in resolved.replace("\\", "/").lower()
+        if resolved is None or store_alias:
+            argv[0] = sys.executable
     return argv
 
 
