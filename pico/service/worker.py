@@ -22,6 +22,114 @@ class Cancelled(RuntimeError):
     pass
 
 
+class LeaseClock:
+    """Conservative local view of the database lease.
+
+    The deadline is measured from *before* each successful claim/renewal
+    request was sent, so it can only under-estimate the lease the database
+    granted. It lets the worker tolerate a transient renewal error while the
+    last confirmed lease is still valid, and stop before that lease can end.
+    Publication is still fenced by the database; this only bounds how long a
+    worker keeps executing without a confirmed lease.
+    """
+
+    def __init__(self, lease_seconds, started):
+        self.lease_seconds = lease_seconds
+        self.deadline = started + lease_seconds
+
+    def renewed(self, sent):
+        self.deadline = sent + self.lease_seconds
+
+    def expired(self, now=None):
+        return (time.monotonic() if now is None else now) >= self.deadline
+
+
+class _JobObject:
+    """Windows Job Object that terminates every member process when closed.
+
+    Binding Agent/verification processes to a kill-on-close job ties their
+    lifetime to the worker: if the worker is hard-killed, the OS closes the
+    handle and ends the whole tree, including detached grandchildren.
+    """
+
+    _KILL_ON_JOB_CLOSE = 0x2000
+    _EXTENDED_LIMIT_INFORMATION = 9
+
+    def __init__(self):
+        import ctypes
+        from ctypes import wintypes
+
+        class Basic(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class Extended(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", Basic),
+                ("IoInfo", ctypes.c_uint64 * 6),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+        k32.SetInformationJobObject.restype = wintypes.BOOL
+        k32.SetInformationJobObject.argtypes = (
+            wintypes.HANDLE,
+            ctypes.c_int,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+        )
+        k32.AssignProcessToJobObject.restype = wintypes.BOOL
+        k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+        k32.TerminateJobObject.restype = wintypes.BOOL
+        k32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        self._ctypes, self._k32 = ctypes, k32
+        self.handle = k32.CreateJobObjectW(None, None)
+        if not self.handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        info = Extended()
+        info.BasicLimitInformation.LimitFlags = self._KILL_ON_JOB_CLOSE
+        if not k32.SetInformationJobObject(
+            self.handle,
+            self._EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        ):
+            error = ctypes.get_last_error()
+            self.close()
+            raise ctypes.WinError(error)
+
+    def assign(self, process):
+        # Popen keeps a full-access process handle in ``_handle``. A process
+        # spawned in the few milliseconds before assignment is not covered;
+        # interpreter start-up makes that window negligible for Pico.
+        if not self._k32.AssignProcessToJobObject(self.handle, int(process._handle)):
+            raise self._ctypes.WinError(self._ctypes.get_last_error())
+
+    def terminate(self):
+        if self.handle:
+            self._k32.TerminateJobObject(self.handle, 1)
+
+    def close(self):
+        if self.handle:
+            self._k32.CloseHandle(self.handle)
+            self.handle = None
+
+
 def git(path, *args):
     return subprocess.run(
         ["git", *args],
@@ -32,20 +140,23 @@ def git(path, *args):
     ).stdout
 
 
-def kill_process_tree(process):
-    if process.poll() is not None:
-        return
+def kill_process_tree(process, job=None):
+    # Descendants may outlive the root (e.g. a background server the Agent
+    # started), so do not skip cleanup just because the root has exited.
     if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            capture_output=True,
-            timeout=15,
-            check=False,
-        )
+        if job is not None:
+            job.terminate()
+        elif process.poll() is None:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
     else:
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
     process.wait(timeout=15)
 
@@ -81,7 +192,9 @@ class Worker:
         self.settings, self.store = settings, store
         self.worker_id = worker_id or "worker-" + uuid4().hex[:12]
 
-    def _run(self, command, cwd, output, timeout, lost, cancel, *, provider=False):
+    def _run(
+        self, command, cwd, output, timeout, lost, cancel, *, provider=False, lease=None
+    ):
         flags = (
             {"start_new_session": True}
             if os.name != "nt"
@@ -90,89 +203,121 @@ class Worker:
                 | subprocess.CREATE_NO_WINDOW
             }
         )
-        with output.open("wb") as log:
-            process = subprocess.Popen(
-                command,
-                cwd=cwd,
-                env=child_environment(provider=provider),
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                **flags,
-            )
-            started = time.monotonic()
-            try:
-                while process.poll() is None:
-                    if lost.is_set():
-                        raise LeaseLost("Lease lost during execution")
-                    if cancel.is_set():
-                        raise Cancelled("Cancellation requested")
-                    if time.monotonic() - started > timeout:
-                        raise TimeoutError("Execution budget exceeded")
-                    time.sleep(0.1)
-                return process.returncode
-            finally:
-                kill_process_tree(process)
+        job = _JobObject() if os.name == "nt" else None
+        try:
+            with output.open("wb") as log:
+                process = subprocess.Popen(
+                    command,
+                    cwd=cwd,
+                    env=child_environment(provider=provider),
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    **flags,
+                )
+                started = time.monotonic()
+                try:
+                    if job is not None:
+                        job.assign(process)
+                    while process.poll() is None:
+                        if lost.is_set() or (lease is not None and lease.expired()):
+                            raise LeaseLost("Lease lost during execution")
+                        if cancel.is_set():
+                            raise Cancelled("Cancellation requested")
+                        if time.monotonic() - started > timeout:
+                            raise TimeoutError("Execution budget exceeded")
+                        time.sleep(0.1)
+                    return process.returncode
+                finally:
+                    kill_process_tree(process, job)
+        finally:
+            if job is not None:
+                job.close()
 
     def _artifact(self, relative):
         path = (self.settings.data_dir / relative).resolve()
         path.relative_to(self.settings.data_dir)
         return path
 
+    def _publish_quietly(self, identity, state, result):
+        """Publish a terminal state from an error path without crashing the loop."""
+        try:
+            self.store.finish(*identity, state, result)
+        except CancellationRequested:
+            # Cancellation won the race against this failure. ``_run`` has
+            # already reaped the managed process tree, so exit is confirmed.
+            self._publish_quietly(
+                identity,
+                "cancelled",
+                {
+                    "reason": "user_cancelled",
+                    "process_exit_confirmed": True,
+                    "superseded_failure": result.get("reason"),
+                },
+            )
+        except LeaseLost:
+            # A stale worker must not publish a failed/successful replacement result.
+            pass
+
     def run_one(self):
+        claimed_at = time.monotonic()
         job = self.store.claim(self.worker_id, self.settings.lease_seconds)
         if job is None:
             return False
         identity = (job["id"], job["generation"], self.worker_id)
         stop, lost, cancel = threading.Event(), threading.Event(), threading.Event()
+        lease = LeaseClock(self.settings.lease_seconds, claimed_at)
+        interval = self.settings.lease_seconds / 3
 
         def heartbeat():
-            while not stop.wait(self.settings.lease_seconds / 3):
+            while not stop.wait(interval):
+                sent = time.monotonic()
                 try:
                     if self.store.heartbeat(*identity, self.settings.lease_seconds):
                         cancel.set()
-                except Exception:
+                    lease.renewed(sent)
+                except LeaseLost:
                     lost.set()
                     return
+                except Exception:
+                    # Transient renewal failure (e.g. dropped DB connection).
+                    # Keep going only if the next attempt still happens while
+                    # the last confirmed lease is valid; otherwise stop now.
+                    if lease.expired(time.monotonic() + interval):
+                        lost.set()
+                        return
 
         thread = threading.Thread(target=heartbeat, daemon=True)
         thread.start()
         try:
-            self._execute(job, identity, lost, cancel)
+            self._execute(job, identity, lost, cancel, lease)
         except (Cancelled, CancellationRequested):
-            try:
-                self.store.finish(
-                    *identity,
-                    "cancelled",
-                    {
-                        "reason": "user_cancelled",
-                        "process_exit_confirmed": True,
-                    },
-                )
-            except LeaseLost:
-                pass
+            self._publish_quietly(
+                identity,
+                "cancelled",
+                {
+                    "reason": "user_cancelled",
+                    "process_exit_confirmed": True,
+                },
+            )
         except LeaseLost:
             # A stale worker must not publish a failed/successful replacement result.
             pass
         except Exception as exc:
-            try:
-                state = "cancelled" if cancel.is_set() else "failed"
-                self.store.finish(
-                    *identity,
-                    state,
-                    {
-                        "reason": type(exc).__name__,
-                        "message": redact_text(str(exc))[:1000],
-                    },
-                )
-            except LeaseLost:
-                pass
+            self._publish_quietly(
+                identity,
+                "cancelled" if cancel.is_set() else "failed",
+                {
+                    "reason": type(exc).__name__,
+                    "message": redact_text(str(exc))[:1000],
+                },
+            )
         finally:
             stop.set()
             thread.join(timeout=5)
         return True
 
-    def _execute(self, job, identity, lost, cancel):
+    def _execute(self, job, identity, lost, cancel, lease=None):
         repository = self.settings.repositories[job["payload"]["repository_id"]]
         base = job["payload"]["base_commit"]
         folder = self.settings.data_dir / job["id"] / str(job["generation"])
@@ -229,6 +374,7 @@ class Worker:
                 lost,
                 cancel,
                 provider=True,
+                lease=lease,
             )
             if code:
                 raise RuntimeError(f"Agent exited with code {code}")
@@ -295,6 +441,7 @@ class Worker:
             self.settings.verify_timeout,
             lost,
             cancel,
+            lease=lease,
         )
         result = {
             "verification_passed": code == 0,
@@ -310,6 +457,43 @@ class Worker:
         self.store.finish(*identity, "succeeded" if code == 0 else "failed", result)
 
 
+def serve(worker, *, once=False, idle_seconds=0.5, max_backoff=10.0):
+    """Worker loop that survives transient database outages.
+
+    An unexpected error (for example ``claim`` failing while PostgreSQL is
+    restarting) is logged and retried with backoff instead of ending the
+    process; any job left mid-flight is recovered by lease expiry.
+    """
+    backoff = idle_seconds
+    while True:
+        try:
+            worked = worker.run_one()
+            backoff = idle_seconds
+        except Exception as exc:  # noqa: BLE001 - loop must stay alive
+            worked = False
+            print(
+                json.dumps(
+                    {
+                        "worker_id": worker.worker_id,
+                        "error": type(exc).__name__,
+                        "message": redact_text(str(exc))[:500],
+                        "retry_in": backoff,
+                    }
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+            if once:
+                return False
+            time.sleep(backoff)
+            backoff = min(backoff * 2, max_backoff)
+            continue
+        if once:
+            return worked
+        if not worked:
+            time.sleep(idle_seconds)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
@@ -318,12 +502,7 @@ def main():
     settings = Settings.load()
     worker = Worker(settings, Store(settings.database_url), worker_id=args.worker_id)
     print(json.dumps({"worker_id": worker.worker_id, "pid": os.getpid()}), flush=True)
-    while True:
-        worked = worker.run_one()
-        if args.once:
-            break
-        if not worked:
-            time.sleep(0.5)
+    serve(worker, once=args.once)
 
 
 if __name__ == "__main__":

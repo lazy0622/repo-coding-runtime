@@ -1,5 +1,4 @@
 import hashlib
-import subprocess
 import sys
 import threading
 import time
@@ -7,80 +6,8 @@ import time
 import pytest
 from sqlalchemy import text
 
-from pico.service.config import Repository, Settings
 from pico.service.store import LeaseLost
 from pico.service.worker import Worker, child_environment
-
-
-@pytest.fixture
-def configured(tmp_path, store):
-    source = tmp_path / "source"
-    source.mkdir()
-    (source / "calculator.py").write_text("def add(a,b):\n    return a-b\n")
-    (source / ".gitignore").write_text(".pico/\n__pycache__/\n")
-    for args in [
-        ["init"],
-        ["add", "."],
-        [
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.invalid",
-            "commit",
-            "-m",
-            "fixture",
-        ],
-    ]:
-        subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
-    count = tmp_path / "agent-count.txt"
-    agent = tmp_path / "agent.py"
-    agent.write_text(
-        "from pathlib import Path\nimport sys\n"
-        f'with Path({str(count)!r}).open("a") as h:h.write("executed\\n")\n'
-        "root=Path(sys.argv[1])\n"
-        'root.joinpath("calculator.py").write_text("def add(a,b):\\n    return a+b\\n")\n'
-        'root.joinpath(".pico").mkdir(exist_ok=True)\n'
-        'root.joinpath(".pico/private.txt").write_text("runtime-private")\n'
-        'root.joinpath(".env").write_text("PRIVATE=do-not-publish")\n'
-        'root.joinpath("notes.txt").write_text("new tracked artifact")\n',
-        encoding="utf-8",
-    )
-    verify = tmp_path / "verify.py"
-    verify.write_text(
-        "import os,runpy,sys\nfrom pathlib import Path\n"
-        'assert "RUNTIME_DATABASE_URL" not in os.environ\n'
-        'assert "RUNTIME_API_TOKEN" not in os.environ\n'
-        'assert "PICO_DEEPSEEK_API_KEY" not in os.environ\n'
-        'assert not (Path(sys.argv[1])/".env").exists()\n'
-        'assert not (Path(sys.argv[1])/".pico").exists()\n'
-        'assert (Path(sys.argv[1])/"notes.txt").is_file()\n'
-        'add=runpy.run_path(str(Path(sys.argv[1])/"calculator.py"))["add"]\n'
-        'assert add(2,3)==5 and add(-2,3)==1\nprint("verification passed")\n',
-        encoding="utf-8",
-    )
-    settings = Settings(
-        store.engine.url,
-        "t" * 32,
-        tmp_path / "data",
-        {
-            "demo": Repository(
-                source,
-                [sys.executable, str(verify), "{workspace}"],
-                [sys.executable, str(agent), "{workspace}"],
-            )
-        },
-        lease_seconds=6,
-        task_timeout=15,
-        verify_timeout=15,
-    )
-    settings.data_dir.mkdir()
-    base = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=source, text=True
-    ).strip()
-    job = store.submit(
-        "job", {"repository_id": "demo", "task": "Fix addition"}, base_commit=base
-    )[0]
-    return settings, job, count
 
 
 def test_worker_produces_verified_patch_and_leaves_source_unchanged(store, configured):

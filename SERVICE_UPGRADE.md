@@ -96,3 +96,13 @@ $env:PYTHONUTF8 = '1'
 ## 代码来源与评审
 
 独立工作目录基于原项目 `78d5297`。`7bfb430` 单独保存实施前已经存在的本地 Runtime 修复；服务升级在其后提交，方便区分旧积累和新增贡献。原目录的 tracked diff 哈希在升级前后相同，未覆盖其未提交修改。
+
+## 独立审查修复（分支 `opus/runtime-review`，基于 `81985c4`）
+
+以下三项均先在 `81985c4` 上用 `tests/service/test_review_regressions.py` 复现失败，再修改 `pico/service/worker.py`：
+
+1. **取消与失败竞争导致 worker 进程退出**：取消已落库、Agent 在下一次心跳前非零退出时，失败分支的 `finish(failed)` 被正确拒绝（`CancellationRequested`），但 worker 只捕获 `LeaseLost`，异常逃出 `run_one` 终止循环。现统一经 `_publish_quietly` 改记为 `cancelled`，并保留被取代的失败原因。
+2. **一次心跳异常即放弃尝试**：任何续租异常都会立即杀掉健康的 Agent、浪费一次尝试并重跑模型。现仅 `LeaseLost` 立即放弃；暂时性错误在本地保守租约期限（从请求发出前计时）内重试，期限将尽时停止子进程。外层 `serve()` 循环在 `claim` 等数据库异常时退避重试而不是退出进程。发布仍由数据库代次/租约校验约束。
+3. **子进程生命周期未绑定 worker（Windows）**：worker 被强杀后 Agent 继续运行；Agent 根进程退出后其后台孙进程也不会被回收。现每次执行创建 kill-on-close Job Object，`kill_process_tree` 终止整个 Job。POSIX 改为总是 `killpg`，但 worker 被强杀时的孤儿问题在 POSIX 上未处理、未测试。
+
+以 strict xfail 记录、未修复：空补丁在验证器本就通过时被发布为 `succeeded`；每次尝试在受信任源仓库注册的 worktree 不会移除。
