@@ -177,6 +177,33 @@ def test_worker_loop_survives_database_outage_during_claim():
     assert DownStore.calls == 1
 
 
+def test_worker_loop_retries_then_claims_after_database_recovers(monkeypatch):
+    from pico.service.worker import serve
+
+    class Finished(BaseException):
+        pass
+
+    class RecoveringWorker:
+        worker_id = "recovering"
+        calls = 0
+
+        def run_one(self):
+            self.calls += 1
+            if self.calls <= 2:
+                raise OperationalError("SELECT", {}, Exception("temporarily down"))
+            if self.calls == 3:
+                return True
+            raise Finished()
+
+    delays = []
+    monkeypatch.setattr(time, "sleep", delays.append)
+    worker = RecoveringWorker()
+    with pytest.raises(Finished):
+        serve(worker, idle_seconds=0.1)
+    assert worker.calls == 4
+    assert delays == [0.1, 0.2]
+
+
 # --- Confirmed but intentionally not fixed in this review branch ----------
 
 
@@ -247,6 +274,41 @@ def _force_kill(pid):
 windows_only = pytest.mark.skipif(
     os.name != "nt", reason="Job Object lifetime binding is Windows-specific"
 )
+
+
+@windows_only
+def test_job_assignment_failure_reaps_unassigned_process(tmp_path, monkeypatch):
+    from pico.service import worker as module
+
+    created = []
+    original = subprocess.Popen
+
+    def remember(*args, **kwargs):
+        process = original(*args, **kwargs)
+        created.append(process)
+        return process
+
+    def reject_assignment(self, process):
+        raise OSError("injected job assignment failure")
+
+    monkeypatch.setattr(module._JobObject, "assign", reject_assignment)
+    monkeypatch.setattr(subprocess, "Popen", remember)
+    never = threading.Event()
+    try:
+        with pytest.raises(OSError, match="injected job assignment failure"):
+            Worker(None, None)._run(
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+                tmp_path,
+                tmp_path / "assignment-failure.log",
+                60,
+                never,
+                never,
+            )
+        assert created[0].poll() is not None
+    finally:
+        for process in created:
+            if process.poll() is None:
+                _force_kill(process.pid)
 
 
 @windows_only

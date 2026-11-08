@@ -30,7 +30,8 @@ class LeaseClock:
     granted. It lets the worker tolerate a transient renewal error while the
     last confirmed lease is still valid, and stop before that lease can end.
     Publication is still fenced by the database; this only bounds how long a
-    worker keeps executing without a confirmed lease.
+    worker attempts to keep executing without a confirmed lease. Scheduling
+    pauses and process termination latency do not provide a hard real-time bound.
     """
 
     def __init__(self, lease_seconds, started):
@@ -115,8 +116,8 @@ class _JobObject:
 
     def assign(self, process):
         # Popen keeps a full-access process handle in ``_handle``. A process
-        # spawned in the few milliseconds before assignment is not covered;
-        # interpreter start-up makes that window negligible for Pico.
+        # spawned before assignment is not covered. This is a known startup
+        # race; this process-lifetime guard is not a security sandbox.
         if not self._k32.AssignProcessToJobObject(self.handle, int(process._handle)):
             raise self._ctypes.WinError(self._ctypes.get_last_error())
 
@@ -216,9 +217,11 @@ class Worker:
                     **flags,
                 )
                 started = time.monotonic()
+                job_assigned = False
                 try:
                     if job is not None:
                         job.assign(process)
+                        job_assigned = True
                     while process.poll() is None:
                         if lost.is_set() or (lease is not None and lease.expired()):
                             raise LeaseLost("Lease lost during execution")
@@ -229,7 +232,9 @@ class Worker:
                         time.sleep(0.1)
                     return process.returncode
                 finally:
-                    kill_process_tree(process, job)
+                    # A created but unassigned Job cannot terminate this process.
+                    # On assignment failure, clean up the actual process tree.
+                    kill_process_tree(process, job if job_assigned else None)
         finally:
             if job is not None:
                 job.close()
