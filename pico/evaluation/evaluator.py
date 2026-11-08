@@ -109,9 +109,8 @@ SCRIPTED_MODEL_OUTPUTS = {
         "<final>README status verified.</final>",
     ],
     "verification_retry": [
-        '<tool name="patch_file" path="README.md"><old_text>status: pending</old_text><new_text>status: pending</new_text></tool>',
-        "<final>First attempt finished.</final>",
-        '<tool name="patch_file" path="README.md"><old_text>status: pending</old_text><new_text>status: passed</new_text></tool>',
+        '<tool name="patch_file" path="README.md"><old_text>status: pending</old_text><new_text>status: wrong</new_text></tool>',
+        '<tool name="patch_file" path="README.md"><old_text>status: wrong</old_text><new_text>status: passed</new_text></tool>',
         "<final>README status passed after verification feedback.</final>",
     ],
     "plan_replay_evidence": [
@@ -308,6 +307,10 @@ def summarize_rows(rows):
     total_tasks = len(rows)
     within_budget = sum(1 for row in rows if row.get("within_budget"))
     verifier_passes = sum(1 for row in rows if row.get("verifier_passed"))
+    # A returned final answer is not proof that the requested change works.
+    completed_rows = [row for row in rows if row.get("stop_reason") == STOP_REASON_FINAL_ANSWER_RETURNED]
+    checked_completions = [row for row in completed_rows if isinstance(row.get("verifier_passed"), bool)]
+    failed_completions = sum(row["verifier_passed"] is False for row in checked_completions)
     return {
         "total_tasks": total_tasks,
         "passed": passed,
@@ -318,6 +321,12 @@ def summarize_rows(rows):
         "within_budget_rate": (within_budget / total_tasks) if total_tasks else 0.0,
         "verifier_pass_rate": (verifier_passes / total_tasks) if total_tasks else 0.0,
         "failure_category_counts": failure_category_counts,
+        "final_answer_count": len(completed_rows),
+        "verified_final_answer_count": len(checked_completions),
+        "final_answer_with_failed_verifier_count": failed_completions,
+        "final_answer_with_failed_verifier_rate": (
+            failed_completions / len(checked_completions) if checked_completions else None
+        ),
     }
 
 
@@ -363,6 +372,8 @@ def render_benchmark_markdown(artifact):
         f"- Tasks: {summary.get('total_tasks', 0)}",
         f"- Passed: {summary.get('passed', 0)}",
         f"- Failed: {summary.get('failed', 0)}",
+        f"- Final answers with failed verifier: {summary.get('final_answer_with_failed_verifier_count', 'not measured')}",
+        f"- Final answers with verifier evidence: {summary.get('verified_final_answer_count', 'not measured')}",
         f"- Pass rate: {float(summary.get('pass_rate', 0.0)):.1%}",
         f"- Patch generation rate: {float(execution_metrics.get('patch_generation_rate', 0.0)):.1%}",
         f"- Average first edit step: {float(execution_metrics.get('average_first_edit_step', 0.0)):.2f}",

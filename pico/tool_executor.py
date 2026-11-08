@@ -125,6 +125,8 @@ class ToolGateway:
                 policy_guidance = (
                     "stop verification loops and return the current evidence or a focused blocker"
                     if policy_reason == "verification_budget_exceeded"
+                    else "return a concise final answer because verification already passed"
+                    if policy_reason == "verification_passed_return_final"
                     else "apply a minimal patch or return a focused blocker"
                 )
                 return self._finish(name, args, ToolExecutionResult(

@@ -54,6 +54,96 @@ class AgentLoop:
         return plan
 
     @staticmethod
+    def _should_verify_after_edit(agent, name, metadata):
+        metadata = dict(metadata or {})
+        return bool(
+            agent.verify_command
+            and name in {"write_file", "patch_file", "apply_patch"}
+            and metadata.get("tool_status") == "ok"
+            and metadata.get("workspace_changed")
+        )
+
+    def _run_verification(self, agent, task_state, user_message, run_started_at, trigger):
+        agent.execution_policy.start_verification(task_state, reason=trigger)
+        self._transition(agent, task_state, PHASE_VERIFYING, trigger)
+        agent.emit_trace(
+            task_state,
+            "verification_started",
+            {
+                "command": agent.verify_command,
+                "attempt": task_state.verification_attempts + 1,
+                "trigger": trigger,
+            },
+        )
+        verification_result = agent.run_verification(task_state)
+        agent.execution_policy.record_runtime_verification(task_state, verification_result.passed)
+        verification_payload = agent.redact_artifact(verification_result.to_dict())
+        agent.emit_trace(task_state, "verification_finished", verification_payload)
+        if verification_result.passed:
+            self._transition(agent, task_state, PHASE_PLANNING, "verification_passed")
+            return True, None
+
+        detail = clip(
+            verification_result.stderr
+            or verification_result.stdout
+            or verification_result.reason
+            or verification_result.error_code,
+            1200,
+        )
+        if (
+            verification_result.status != VERIFY_BLOCKED
+            and task_state.verification_attempts <= agent.max_verification_attempts
+            and agent.execution_policy.can_repair_verification(task_state)
+        ):
+            plan = agent.current_plan()
+            if plan is not None:
+                plan.record_verification_failure(detail)
+                agent.session["plan"] = plan.to_dict()
+                agent.session_path = agent.session_store.save(agent.session)
+            self._sync_plan_progress(agent, task_state)
+            agent.record(
+                {
+                    "role": "verification",
+                    "content": f"Verification failed (attempt {task_state.verification_attempts}): {detail}",
+                    "created_at": now(),
+                }
+            )
+            agent.emit_trace(
+                task_state,
+                "verification_retry",
+                {"attempt": task_state.verification_attempts, "reason": detail},
+            )
+            agent.run_store.write_task_state(task_state)
+            self._transition(agent, task_state, PHASE_PLANNING, "verification_failed_retry")
+            return False, None
+
+        final = f"Verification failed after {task_state.verification_attempts} attempt(s): {detail}"
+        agent.fail_plan(detail)
+        self._sync_plan_progress(agent, task_state)
+        terminal_previous_phase = task_state.phase
+        task_state.stop_verification_failed(final)
+        self._emit_terminal_transition(agent, task_state, terminal_previous_phase, "verification_failed")
+        checkpoint = agent.create_checkpoint(task_state, user_message, trigger="verification_failed")
+        agent.run_store.write_task_state(task_state)
+        agent.emit_trace(
+            task_state,
+            "checkpoint_created",
+            {"checkpoint_id": checkpoint["checkpoint_id"], "trigger": "verification_failed"},
+        )
+        agent.emit_trace(
+            task_state,
+            "run_finished",
+            {
+                "status": task_state.status,
+                "stop_reason": task_state.stop_reason,
+                "final_answer": final,
+                "run_duration_ms": int((time.monotonic() - run_started_at) * 1000),
+            },
+        )
+        agent.run_store.write_report(task_state, agent.redact_artifact(agent.build_report(task_state)))
+        return False, final
+
+    @staticmethod
     def _is_resume_request(agent, user_message):
         if not agent.current_plan() or agent.resume_state.get("status") == CHECKPOINT_NONE_STATUS:
             return False
@@ -296,6 +386,17 @@ class AgentLoop:
                             "trigger": "tool_finished",
                         },
                     )
+                if self._should_verify_after_edit(agent, name, metadata):
+                    _, terminal_answer = self._run_verification(
+                        agent,
+                        task_state,
+                        user_message,
+                        run_started_at,
+                        "post_edit_verification",
+                    )
+                    if terminal_answer is not None:
+                        return terminal_answer
+                    continue
                 self._transition(agent, task_state, PHASE_PLANNING, "tool_finished")
                 continue
 
@@ -355,81 +456,24 @@ class AgentLoop:
                 continue
             agent.record({"role": "assistant", "content": final, "created_at": now()})
 
-            if agent.verify_command:
-                previous_phase = task_state.phase
-                agent.execution_policy.start_verification(task_state)
-                self._transition(agent, task_state, PHASE_VERIFYING, "verification_started")
-                agent.emit_trace(
+            if agent.verify_command and not task_state.final_verifier_passed:
+                verified, terminal_answer = self._run_verification(
+                    agent,
                     task_state,
+                    user_message,
+                    run_started_at,
                     "verification_started",
-                    {"command": agent.verify_command, "attempt": task_state.verification_attempts + 1},
                 )
-                verification_result = agent.run_verification(task_state)
-                agent.execution_policy.record_runtime_verification(task_state, verification_result.passed)
-                verification_payload = agent.redact_artifact(verification_result.to_dict())
-                agent.emit_trace(task_state, "verification_finished", verification_payload)
-                if not verification_result.passed:
-                    detail = clip(
-                        verification_result.stderr or verification_result.stdout or verification_result.reason or verification_result.error_code,
-                        1200,
-                    )
-                    if (
-                        verification_result.status != VERIFY_BLOCKED
-                        and task_state.verification_attempts <= agent.max_verification_attempts
-                        and agent.execution_policy.can_repair_verification(task_state)
-                    ):
-                        plan = agent.current_plan()
-                        if plan is not None:
-                            plan.record_verification_failure(detail)
-                            agent.session["plan"] = plan.to_dict()
-                            agent.session_path = agent.session_store.save(agent.session)
-                        self._sync_plan_progress(agent, task_state)
-                        agent.record(
-                            {
-                                "role": "verification",
-                                "content": f"Verification failed (attempt {task_state.verification_attempts}): {detail}",
-                                "created_at": now(),
-                            }
-                        )
-                        agent.emit_trace(
-                            task_state,
-                            "verification_retry",
-                            {"attempt": task_state.verification_attempts, "reason": detail},
-                        )
-                        agent.run_store.write_task_state(task_state)
-                        self._transition(agent, task_state, PHASE_PLANNING, "verification_failed_retry")
-                        continue
-
-                    final = f"Verification failed after {task_state.verification_attempts} attempt(s): {detail}"
-                    agent.fail_plan(detail)
-                    self._sync_plan_progress(agent, task_state)
-                    terminal_previous_phase = task_state.phase
-                    task_state.stop_verification_failed(final)
-                    self._emit_terminal_transition(agent, task_state, terminal_previous_phase, "verification_failed")
-                    checkpoint = agent.create_checkpoint(task_state, user_message, trigger="verification_failed")
-                    agent.run_store.write_task_state(task_state)
-                    agent.emit_trace(
-                        task_state,
-                        "checkpoint_created",
-                        {"checkpoint_id": checkpoint["checkpoint_id"], "trigger": "verification_failed"},
-                    )
-                    agent.emit_trace(
-                        task_state,
-                        "run_finished",
-                        {
-                            "status": task_state.status,
-                            "stop_reason": task_state.stop_reason,
-                            "final_answer": final,
-                            "run_duration_ms": int((time.monotonic() - run_started_at) * 1000),
-                        },
-                    )
-                    agent.run_store.write_report(task_state, agent.redact_artifact(agent.build_report(task_state)))
-                    return final
+                if terminal_answer is not None:
+                    return terminal_answer
+                if not verified:
+                    continue
 
             completed_task_id = task_state.current_task_id
             completed_plan = agent.complete_plan(final)
             self._sync_plan_progress(agent, task_state)
             if completed_plan is not None and completed_plan.status != "completed":
+                task_state.final_verifier_passed = False
                 agent.emit_trace(
                     task_state,
                     "plan_task_completed",

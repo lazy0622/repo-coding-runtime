@@ -139,7 +139,9 @@ class PatchJournal:
     @staticmethod
     def _atomic_write(path, text):
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        # Nested Windows worktrees can approach MAX_PATH. Keep the temporary
+        # suffix short while retaining a per-write random name.
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
         try:
             with temporary.open("w", encoding="utf-8", newline="") as handle:
                 handle.write(text)

@@ -129,7 +129,16 @@ class ExecutionPolicy:
         return message
 
     def before_model(self, task_state):
-        if not self.config.enabled or not task_state.edit_required or task_state.write_tool_steps:
+        if not self.config.enabled or not task_state.edit_required:
+            return ""
+        if task_state.final_verifier_passed:
+            return self._notice_once(
+                task_state,
+                "verification_passed_return_final",
+                "Supervisor: the configured verifier has passed. Return a concise final answer now; "
+                "if another edit is genuinely required, edit directly without repeating discovery.",
+            )
+        if task_state.write_tool_steps:
             return ""
         if task_state.tool_steps >= self.config.first_edit_deadline - 1:
             task_state.transition_work_stage(STAGE_EDIT, reason="first_edit_deadline")
@@ -175,6 +184,8 @@ class ExecutionPolicy:
 
         if not self.config.enabled or not task_state.edit_required:
             return True, ""
+        if task_state.final_verifier_passed and name in DISCOVERY_TOOLS | VERIFY_TOOLS:
+            return False, "verification_passed_return_final"
         if (
             name in DISCOVERY_TOOLS
             and not task_state.write_tool_steps
@@ -189,6 +200,9 @@ class ExecutionPolicy:
         metadata = dict(metadata or {})
         changed = bool(metadata.get("workspace_changed"))
         if name in EDIT_TOOLS and changed:
+            # A new edit invalidates the previous verifier result. The next
+            # successful edit will trigger a fresh runtime verification.
+            task_state.final_verifier_passed = False
             task_state.write_tool_steps += 1
             task_state.read_only_streak = 0
             if not task_state.first_edit_step:

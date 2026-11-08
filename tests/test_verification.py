@@ -28,6 +28,29 @@ def test_verification_pass_is_recorded_before_final_completion(tmp_path):
     assert agent.current_task_state.verification_attempts == 1
 
 
+def test_successful_edit_triggers_immediate_verification_once(tmp_path):
+    agent = build_agent(
+        tmp_path,
+        [
+            '<tool name="patch_file" path="README.md"><old_text>demo</old_text><new_text>updated</new_text></tool>',
+            "<final>Done.</final>",
+        ],
+        task_mode="edit",
+        verify_command="echo verify",
+        max_steps=2,
+    )
+
+    assert agent.ask("Update README.md") == "Done."
+    assert agent.current_task_state.final_verifier_passed is True
+    assert agent.current_task_state.verification_attempts == 1
+    events = [
+        json.loads(line)
+        for line in agent.run_store.trace_path(agent.current_task_state).read_text(encoding="utf-8").splitlines()
+    ]
+    assert sum(event["event"] == "verification_started" for event in events) == 1
+    assert sum(event["event"] == "verification_finished" for event in events) == 1
+
+
 def test_verification_failure_retries_then_stops_with_evidence(tmp_path):
     failing_command = f'"{sys.executable}" -c "import sys; sys.exit(1)"'
     agent = build_agent(

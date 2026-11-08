@@ -102,6 +102,10 @@ def test_run_fixed_benchmark_reports_metadata_and_success_definition(tmp_path):
         "within_budget_rate": 1.0,
         "verifier_pass_rate": 1.0,
         "failure_category_counts": {},
+        "final_answer_count": 12,
+        "verified_final_answer_count": 12,
+        "final_answer_with_failed_verifier_count": 0,
+        "final_answer_with_failed_verifier_rate": 0.0,
     }
     assert artifact["failure_category_counts"] == {}
 
