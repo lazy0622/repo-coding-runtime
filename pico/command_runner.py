@@ -131,6 +131,7 @@ def run_shell_command(
             shell=False,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout,
             env=env,
         )
@@ -145,6 +146,7 @@ def run_shell_command(
         shell=True,
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=timeout,
         env=env,
     )

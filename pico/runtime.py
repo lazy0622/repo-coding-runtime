@@ -38,7 +38,7 @@ from . import tools as toolkit
 from . import verification as verificationlib
 from .workspace import IGNORED_PATH_NAMES, MAX_HISTORY, WorkspaceContext, clip, now
 
-DEFAULT_SHELL_ENV_ALLOWLIST = ("HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "PWD", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "USER")
+DEFAULT_SHELL_ENV_ALLOWLIST = ("HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "PWD", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "USER", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE")
 DEFAULT_FEATURE_FLAGS = {
     "memory": True,
     "relevant_memory": True,
@@ -481,7 +481,10 @@ class Pico:
         return securitylib.redact_artifact(value, key=key, secret_env_names=self.secret_env_names)
 
     def shell_env(self):
-        return securitylib.shell_env(allowlist=self.shell_env_allowlist, root=self.root)
+        env = securitylib.shell_env(allowlist=self.shell_env_allowlist, root=self.root)
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+        return env
 
     def classify_tool_call(self, name, args):
         if str(name) == "run_shell":

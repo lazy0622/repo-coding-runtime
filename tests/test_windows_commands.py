@@ -38,3 +38,35 @@ def test_following_shell_commands_keep_shell_semantics(tmp_path):
 def test_unsupported_multiline_chain_does_not_report_false_success(tmp_path):
     with pytest.raises(ValueError, match="Multiline Windows shell"):
         run_shell_command("echo first\necho second", cwd=tmp_path, env={}, timeout=10)
+
+
+def test_non_utf8_output_does_not_lose_the_real_exit_code(tmp_path):
+    result = run_shell_command(
+        'python -c "import sys;sys.stdout.buffer.write(bytes([255]));sys.exit(7)"',
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        timeout=10,
+    )
+    assert result.returncode == 7 and result.stdout
+
+
+def test_runtime_verifier_can_import_windows_asyncio_without_passing_credentials(
+    tmp_path, monkeypatch
+):
+    from pico import FakeModelClient, Pico, SessionStore, WorkspaceContext
+
+    monkeypatch.setenv("PICO_DEEPSEEK_API_KEY", "must-not-inherit")
+    agent = Pico(
+        model_client=FakeModelClient([]),
+        workspace=WorkspaceContext.build(tmp_path),
+        session_store=SessionStore(tmp_path / ".pico/sessions"),
+    )
+    env = agent.shell_env()
+    assert env.get("SystemRoot") and "PICO_DEEPSEEK_API_KEY" not in env
+    result = run_shell_command(
+        'python -c "import asyncio;print(17)"',
+        cwd=tmp_path,
+        env=env,
+        timeout=10,
+    )
+    assert result.returncode == 0 and result.stdout.strip() == "17"
