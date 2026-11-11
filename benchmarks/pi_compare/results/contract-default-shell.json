@@ -1,0 +1,45 @@
+{
+  "tier": "real_pi_rpc_contracts_no_model_calls",
+  "engine_version": "1.5.1",
+  "model_calls": 0,
+  "passed": 0,
+  "observed": 6,
+  "cases": [
+    {
+      "case": "multiline_cwd_and_unicode",
+      "passed": false,
+      "exit_code": 1,
+      "output": "<3>WSL (10 - Relay) ERROR: CreateProcessCommon:817: execvpe(/bin/bash) failed: No such file or directory\n"
+    },
+    {
+      "case": "nonzero_exit",
+      "passed": false,
+      "exit_code": 1,
+      "output": "<3>WSL (13 - Relay) ERROR: CreateProcessCommon:817: execvpe(/bin/bash) failed: No such file or directory\n"
+    },
+    {
+      "case": "windows_asyncio_prerequisites",
+      "passed": false,
+      "exit_code": 1,
+      "output": "<3>WSL (16 - Relay) ERROR: CreateProcessCommon:817: execvpe(/bin/bash) failed: No such file or directory\n"
+    },
+    {
+      "case": "builtin_format",
+      "passed": false,
+      "exit_code": 1,
+      "output": "<3>WSL (19 - Relay) ERROR: CreateProcessCommon:817: execvpe(/bin/bash) failed: No such file or directory\n"
+    },
+    {
+      "case": "model_key_not_in_command_environment",
+      "passed": false,
+      "exit_code": 1,
+      "output": "<3>WSL (22 - Relay) ERROR: CreateProcessCommon:817: execvpe(/bin/bash) failed: No such file or directory\n"
+    },
+    {
+      "case": "non_utf8_output_does_not_crash",
+      "passed": false,
+      "exit_code": 1,
+      "output": "<3>WSL (25 - Relay) ERROR: CreateProcessCommon:817: execvpe(/bin/bash) failed: No such file or directory\n"
+    }
+  ]
+}

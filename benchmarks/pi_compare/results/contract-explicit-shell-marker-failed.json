@@ -1,0 +1,45 @@
+{
+  "tier": "real_pi_rpc_contracts_no_model_calls",
+  "engine_version": "1.5.1",
+  "model_calls": 0,
+  "passed": 6,
+  "observed": 6,
+  "cases": [
+    {
+      "case": "multiline_cwd_and_unicode",
+      "passed": true,
+      "exit_code": 0,
+      "output": "space folder\n中文✓\n"
+    },
+    {
+      "case": "nonzero_exit",
+      "passed": true,
+      "exit_code": 7,
+      "output": "before-exit\n"
+    },
+    {
+      "case": "windows_asyncio_prerequisites",
+      "passed": true,
+      "exit_code": 0,
+      "output": "asyncio-ok\n"
+    },
+    {
+      "case": "builtin_format",
+      "passed": true,
+      "exit_code": 0,
+      "output": "1,234,567\n"
+    },
+    {
+      "case": "model_key_not_in_command_environment",
+      "passed": true,
+      "exit_code": 0,
+      "output": "credentials-absent\n"
+    },
+    {
+      "case": "non_utf8_output_does_not_crash",
+      "passed": true,
+      "exit_code": 0,
+      "output": "raw-�-done"
+    }
+  ]
+}

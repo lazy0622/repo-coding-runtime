@@ -210,10 +210,12 @@ def run(args):
         "tool_steps": 0,
         "model_calls": 0,
         "thinking": False,
-        "max_model_calls": 13,
+        "completed_response_budget": 13,
+        "budget_note": "Stopped on a subsequent assistant start after 13 completed responses; not a hard HTTP request cap.",
     }
     started = time.monotonic()
     last = None
+    accepted = False
     try:
         rpc = launch(args.node, args.cli, workspace, folder, shell=args.shell)
         rpc.request("set_auto_retry", enabled=False)
@@ -225,6 +227,10 @@ def run(args):
                 kind = event.get("type")
                 if kind == "response" and not event.get("success"):
                     raise RuntimeError(event.get("error", "Pi request rejected"))
+                if kind == "response" and event.get("id") == "task":
+                    if (event.get("data") or {}).get("disposition") != "started":
+                        raise RuntimeError("Single-task Pi prompt was not started")
+                    accepted = True
                 if (
                     kind == "message_start"
                     and event.get("message", {}).get("role") == "assistant"
@@ -240,6 +246,23 @@ def run(args):
                         )
                         + "\n"
                     )
+                if kind in {"tool_execution_start", "tool_execution_end"}:
+                    record = json.dumps(
+                        {
+                            "event": "pi_tool_detail",
+                            "type": kind,
+                            "tool": event.get("toolName"),
+                            "args": event.get("args"),
+                            "result": event.get("result"),
+                            "is_error": event.get("isError"),
+                        },
+                        ensure_ascii=False,
+                    )
+                    key = os.environ.get("PICO_DEEPSEEK_API_KEY")
+                    if key:
+                        record = record.replace(key, "[REDACTED]")
+                    trace.write(redact_text(record) + "\n")
+                    trace.flush()
                 if (
                     kind == "message_end"
                     and event.get("message", {}).get("role") == "assistant"
@@ -267,6 +290,7 @@ def run(args):
                 if kind == "agent_settled":
                     if (
                         event.get("aborted")
+                        or not accepted
                         or not last
                         or last.get("stopReason") != "stop"
                     ):

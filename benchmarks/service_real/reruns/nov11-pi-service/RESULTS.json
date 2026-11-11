@@ -1,0 +1,195 @@
+{
+  "tier": "known_task_regression_not_new_heldout",
+  "run_label": "nov11-pi-service",
+  "service_commit": "1e4a562f680e6bc669f75767debd8a2b6476c3c3",
+  "engine": "pi",
+  "engine_version": "1.5.1",
+  "frozen_manifest_sha256": "5b33e316a8379fd0708b0a0891e572dbb01ff1b532dcc4c9bafc4af12ee7c575",
+  "model": "deepseek-flash",
+  "thinking": false,
+  "max_model_steps_per_attempt": null,
+  "max_model_calls_per_attempt": 13,
+  "budget_note": "Pi: 13 assistant-message call cap, 230s adapter deadline; Pico: 12 tool-step cap. These are not identical step semantics. Both share service task and independent-verification deadlines.",
+  "task_timeout_seconds": 240.0,
+  "verification_timeout_seconds": 60.0,
+  "cost_currency_amount": null,
+  "cost_note": "Provider token usage recorded; monetary cost not returned by provider.",
+  "total": 5,
+  "succeeded": 2,
+  "agent_naturally_completed": 3,
+  "configured_verified_stops": 0,
+  "results": [
+    {
+      "case_id": "humanize-intcomma-large-int",
+      "source_url": "https://github.com/python-humanize/humanize/pull/392",
+      "upstream_base_commit": "14965a74953eb5119859975e7c452a04b481cdae",
+      "fix_reference_commit": "984526c02448110a8392dde3f5e26096dfd7c729",
+      "base_snapshot_commit": "92d95cea79d59d5e54996ab522d4a058fc7816e1",
+      "preflight_exit_codes": {
+        "base": 1,
+        "reference": 0
+      },
+      "base_upstream_regression_exit_code": 0,
+      "state": "failed",
+      "result": {
+        "reason": "RuntimeError",
+        "message": "Agent exited with code 1"
+      },
+      "attempts": [
+        {
+          "generation": 1,
+          "state": "failed",
+          "elapsed_seconds": 22.79,
+          "model_calls": 13,
+          "observed_usage": {
+            "input_tokens": 65545,
+            "output_tokens": 1982
+          },
+          "runtime_status": "failed",
+          "runtime_stop_reason": "model_call_limit_reached",
+          "tool_steps": 14
+        }
+      ]
+    },
+    {
+      "case_id": "humanize-fractional-whole",
+      "source_url": "https://github.com/python-humanize/humanize/pull/354",
+      "upstream_base_commit": "e1a5c7c9efe9f82edc89a2df8c2b599516a87dcb",
+      "fix_reference_commit": "08cf2c3026cfd7c553e397e1d91ea069eb2a4978",
+      "base_snapshot_commit": "16bedcb887d22d9a311b52050d151f6de2cdf49b",
+      "preflight_exit_codes": {
+        "base": 1,
+        "reference": 0
+      },
+      "base_upstream_regression_exit_code": 0,
+      "state": "failed",
+      "result": {
+        "change_kind": "patch",
+        "verification_passed": false,
+        "verification_exit_code": 1,
+        "patch_sha256": "70727dce63be52f880fe82e48bdf53fbb038d7f1375e758b3bad8b8d1ba2bff5",
+        "recovery": "new_execution",
+        "verification_output": "Traceback (most recent call last):\r\n  File \"C:\\Users\\Administrator\\Desktop\\agent\\repo-runtime-service\\benchmarks\\service_real\\verify.py\", line 107, in <module>\r\n    main()\r\n  File \"C:\\Users\\Administrator\\Desktop\\agent\\repo-runtime-service\\benchmarks\\service_real\\verify.py\", line 92, in main\r\n    behavior(case_id)\r\n  File \"C:\\Users\\Administrator\\Desktop\\agent\\repo-runtime-service\\benchmarks\\service_real\\verify.py\", line 31, in behavior\r\n    assert humanize.fractional(value) == expected, value\r\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: 0.9999999\r\n"
+      },
+      "attempts": [
+        {
+          "generation": 1,
+          "state": "failed",
+          "elapsed_seconds": 17.85,
+          "model_calls": 8,
+          "observed_usage": {
+            "input_tokens": 35254,
+            "output_tokens": 1017
+          },
+          "runtime_status": "completed",
+          "runtime_stop_reason": "final_answer_returned",
+          "tool_steps": 7
+        }
+      ]
+    },
+    {
+      "case_id": "humanize-naturalsize-rollover",
+      "source_url": "https://github.com/python-humanize/humanize/pull/329",
+      "upstream_base_commit": "7574e0cc377d80db0d2756fc2c5e0b8799a6f8b4",
+      "fix_reference_commit": "823ad6096e1e5ba82ea876ce761fc2efebd76157",
+      "base_snapshot_commit": "a80a3cfa2d8142661e068a1a9ff8b4344193a594",
+      "preflight_exit_codes": {
+        "base": 1,
+        "reference": 0
+      },
+      "base_upstream_regression_exit_code": 0,
+      "state": "failed",
+      "result": {
+        "reason": "RuntimeError",
+        "message": "Agent exited with code 1"
+      },
+      "attempts": [
+        {
+          "generation": 1,
+          "state": "failed",
+          "elapsed_seconds": 31.85,
+          "model_calls": 13,
+          "observed_usage": {
+            "input_tokens": 78276,
+            "output_tokens": 1771
+          },
+          "runtime_status": "failed",
+          "runtime_stop_reason": "model_call_limit_reached",
+          "tool_steps": 13
+        }
+      ]
+    },
+    {
+      "case_id": "itsdangerous-future-timestamp",
+      "source_url": "https://github.com/pallets/itsdangerous/commit/c30678d19e37011890e2374cca04f7789e101793",
+      "upstream_base_commit": "1a9b8d1f9968eb248bda69f39d373a6330b692ba",
+      "fix_reference_commit": "c30678d19e37011890e2374cca04f7789e101793",
+      "base_snapshot_commit": "d37281ae543d51a913ef9e05add72d03532d3a5d",
+      "preflight_exit_codes": {
+        "base": 1,
+        "reference": 0
+      },
+      "base_upstream_regression_exit_code": 0,
+      "state": "succeeded",
+      "result": {
+        "change_kind": "patch",
+        "verification_passed": true,
+        "verification_exit_code": 0,
+        "patch_sha256": "86543c647972b40b26500020935d8137c003ab96f1a3cd69977ec87d21878801",
+        "recovery": "new_execution",
+        "verification_output": "Independent behavior checks passed\r\n........................................................................ [ 64%]\r\n........................................                                 [100%]\r\n112 passed in 0.48s\r\n"
+      },
+      "attempts": [
+        {
+          "generation": 1,
+          "state": "succeeded",
+          "elapsed_seconds": 17.08,
+          "model_calls": 7,
+          "observed_usage": {
+            "input_tokens": 26363,
+            "output_tokens": 660
+          },
+          "runtime_status": "completed",
+          "runtime_stop_reason": "final_answer_returned",
+          "tool_steps": 6
+        }
+      ]
+    },
+    {
+      "case_id": "itsdangerous-none-salt",
+      "source_url": "https://github.com/pallets/itsdangerous/commit/41ec419632aae3533ff12838044eeddd9cd1311f",
+      "upstream_base_commit": "15a2e0d9b4bdaa38144c947a9aa04ffd49826700",
+      "fix_reference_commit": "41ec419632aae3533ff12838044eeddd9cd1311f",
+      "base_snapshot_commit": "8be121df4f636e6d0af6520681adafde6901a7b7",
+      "preflight_exit_codes": {
+        "base": 1,
+        "reference": 0
+      },
+      "base_upstream_regression_exit_code": 0,
+      "state": "succeeded",
+      "result": {
+        "change_kind": "patch",
+        "verification_passed": true,
+        "verification_exit_code": 0,
+        "patch_sha256": "ea8ef92f987e13fe498e31bc5f862c3597280c44f1d16b5b4bcfaf41c2eee2c0",
+        "recovery": "new_execution",
+        "verification_output": "Independent behavior checks passed\r\n.................                                                        [100%]\r\n17 passed in 0.08s\r\n"
+      },
+      "attempts": [
+        {
+          "generation": 1,
+          "state": "succeeded",
+          "elapsed_seconds": 21.79,
+          "model_calls": 11,
+          "observed_usage": {
+            "input_tokens": 65378,
+            "output_tokens": 1198
+          },
+          "runtime_status": "completed",
+          "runtime_stop_reason": "final_answer_returned",
+          "tool_steps": 10
+        }
+      ]
+    }
+  ]
+}

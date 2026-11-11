@@ -174,9 +174,11 @@ def main(label="", engine="pico"):
         "model": "deepseek-flash",
         "thinking": False,
         "max_model_steps_per_attempt": 12 if engine == "pico" else None,
-        "max_model_calls_per_attempt": 13 if engine == "pi" else None,
+        "completed_response_budget": 13 if engine == "pi" else None,
+        "model_calls_measurement": "Observed completed assistant response metadata; failed or aborted provider attempts may be absent.",
         "budget_note": (
-            "Pi: 13 assistant-message call cap, 230s adapter deadline; "
+            "Pi: stop on next assistant start after 13 completed responses, "
+            "not a hard HTTP request cap; 230s adapter deadline; "
             "Pico: 12 tool-step cap. These are not identical step semantics. "
             "Both share service task and independent-verification deadlines."
         ),

@@ -1,0 +1,36 @@
+[
+  {
+    "label": "live-model-env-smoke",
+    "report": {
+      "engine": "pi",
+      "engine_version": "1.5.1",
+      "status": "failed",
+      "stop_reason": "adapter_error",
+      "tool_steps": 0,
+      "model_calls": 1,
+      "thinking": false,
+      "max_model_calls": 13,
+      "error_type": "RuntimeError",
+      "error_message": "404 status code (no body)",
+      "elapsed_seconds": 2.0
+    }
+  },
+  {
+    "label": "live-model-env-smoke-v2",
+    "report": {
+      "engine": "pi",
+      "engine_version": "1.5.1",
+      "status": "completed",
+      "stop_reason": "final_answer_returned",
+      "tool_steps": 1,
+      "model_calls": 2,
+      "thinking": false,
+      "max_model_calls": 13,
+      "elapsed_seconds": 5.41
+    },
+    "host_checked_proof": {
+      "credentials_absent": true,
+      "formatted": "1,234,567"
+    }
+  }
+]
