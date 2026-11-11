@@ -90,6 +90,7 @@ class Pico:
         verify_command=None,
         verify_timeout=60,
         max_verification_attempts=2,
+        stop_after_verification=False,
         execution_policy=None,
         task_mode="auto",
         sandbox_config=None,
@@ -125,6 +126,7 @@ class Pico:
         self.verify_command = str(verify_command or "").strip()
         self.verify_timeout = max(1, int(verify_timeout))
         self.max_verification_attempts = max(0, int(max_verification_attempts))
+        self.stop_after_verification = bool(stop_after_verification)
         policy_value = execution_policy
         no_edit_capability = self.allowed_tools is not None and not (set(self.allowed_tools) & EDIT_TOOLS)
         if self.read_only or no_edit_capability:

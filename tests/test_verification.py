@@ -80,6 +80,33 @@ def test_verification_without_command_is_skipped(tmp_path):
     assert result.passed is False
 
 
+def test_opt_in_verified_stop_does_not_request_more_model_actions(tmp_path):
+    agent = build_agent(
+        tmp_path,
+        ['<tool name="patch_file" path="README.md"><old_text>demo</old_text><new_text>updated</new_text></tool>'],
+        task_mode="edit", plan_mode=False, verify_command="echo verified",
+        stop_after_verification=True, max_steps=2,
+    )
+    agent.ask("Update README.md")
+    assert agent.current_task_state.status == "completed"
+    assert agent.current_task_state.stop_reason == "configured_verification_passed"
+    assert agent.current_task_state.attempts == 1
+    assert agent.current_task_state.final_verifier_passed is True
+
+
+def test_verified_stop_never_completes_after_a_failed_check(tmp_path):
+    agent = build_agent(
+        tmp_path,
+        ['<tool name="patch_file" path="README.md"><old_text>demo</old_text><new_text>updated</new_text></tool>'],
+        task_mode="edit", plan_mode=False,
+        verify_command=f'"{sys.executable}" -c "import sys;sys.exit(3)"',
+        stop_after_verification=True, max_verification_attempts=0, max_steps=2,
+    )
+    agent.ask("Update README.md")
+    assert agent.current_task_state.stop_reason == "verification_failed"
+    assert agent.current_task_state.final_verifier_passed is False
+
+
 def test_verification_nonzero_exit_is_failed(tmp_path):
     command = f'"{sys.executable}" -c "import sys; sys.exit(2)"'
 

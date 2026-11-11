@@ -9,7 +9,7 @@ REDACTED_VALUE = "<redacted>"
 _BLOCKED_COMMAND_PATTERNS = (
     (re.compile(r"\brm\s+-[^\n]*r[^\n]*f", re.I), "recursive_force_delete"),
     (re.compile(r"\b(?:del|rmdir)\b[^\n]*(?:/s|/q)", re.I), "windows_recursive_delete"),
-    (re.compile(r"\bformat(?:\.com)?\b", re.I), "disk_format"),
+    (re.compile(r"\bformat(?:\.com)?\b(?!\s*\()", re.I), "disk_format"),
     (re.compile(r"\b(?:shutdown|reboot|diskpart)\b", re.I), "system_control"),
     (re.compile(r"\bgit\s+(?:reset\s+--hard|clean\s+-[^\n]*f|restore\s+--source)", re.I), "destructive_git"),
     (re.compile(r"\bremove-item\b[^\n]*-recurse[^\n]*-force", re.I), "powershell_recursive_delete"),

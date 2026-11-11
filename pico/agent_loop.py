@@ -193,6 +193,7 @@ class AgentLoop:
         # 4. 记录：把结果写回 history / task_state / trace / memory
         # 然后进入下一轮，直到停机条件满足
         while tool_steps < agent.max_steps and attempts < max_attempts:
+            completion_reason = "final_answer_returned"
             attempts += 1
             task_state.record_attempt()
             agent.execution_policy.record_model_attempt(task_state)
@@ -387,7 +388,7 @@ class AgentLoop:
                         },
                     )
                 if self._should_verify_after_edit(agent, name, metadata):
-                    _, terminal_answer = self._run_verification(
+                    verified, terminal_answer = self._run_verification(
                         agent,
                         task_state,
                         user_message,
@@ -396,9 +397,16 @@ class AgentLoop:
                     )
                     if terminal_answer is not None:
                         return terminal_answer
+                    if verified and agent.stop_after_verification:
+                        kind = "final"
+                        payload = "Code edited and configured development checks passed. Independent acceptance remains the service's responsibility."
+                        raw = payload
+                        completion_reason = "configured_verification_passed"
+                    else:
+                        continue
+                else:
+                    self._transition(agent, task_state, PHASE_PLANNING, "tool_finished")
                     continue
-                self._transition(agent, task_state, PHASE_PLANNING, "tool_finished")
-                continue
 
             if kind == "retry":
                 agent.record({"role": "assistant", "content": payload, "created_at": now()})
@@ -487,11 +495,12 @@ class AgentLoop:
                 continue
             previous_phase = task_state.phase
             task_state.finish_success(final)
+            task_state.stop_reason = completion_reason
             self._emit_terminal_transition(
                 agent,
                 task_state,
                 previous_phase,
-                "final_answer_returned",
+                completion_reason,
             )
             agent.promote_durable_memory(user_message, final)
             checkpoint = agent.create_checkpoint(task_state, user_message, trigger="run_finished")

@@ -61,3 +61,9 @@ def test_shell_command_policy_blocks_destructive_commands_and_marks_high_risk():
     assert high_risk["decision"] == "allow"
     assert high_risk["risk_level"] == "high"
     assert safe["risk_level"] == "low"
+
+
+def test_python_format_builtin_is_not_a_disk_format_command():
+    assert classify_shell_command('python -c "print(format(123, chr(44)))"')["decision"] == "allow"
+    for command in ['format C:', '"format.com" C:', 'python -c "os.system(\'format C:\')"']:
+        assert classify_shell_command(command)["decision"] == "deny"

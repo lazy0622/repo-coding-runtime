@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import signal
+import shlex
 import subprocess
 import sys
 import threading
@@ -396,6 +397,24 @@ class Worker:
                     "--",
                     job["payload"]["task"],
                 ]
+                if repository.agent_verify_command:
+                    development = [
+                        arg.replace("{workspace}", str(workspace))
+                        for arg in repository.agent_verify_command
+                    ]
+                    verify_command = (
+                        subprocess.list2cmdline(development)
+                        if os.name == "nt"
+                        else shlex.join(development)
+                    )
+                    command[-2:-2] = [
+                        "--no-plan",
+                        "--stop-after-verification",
+                        "--verify-command",
+                        verify_command,
+                        "--verify-timeout",
+                        str(int(self.settings.verify_timeout)),
+                    ]
             code = self._run(
                 command,
                 workspace,

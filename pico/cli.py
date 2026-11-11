@@ -288,6 +288,7 @@ def build_agent(args):
             verify_command=getattr(args, "verify_command", None),
             verify_timeout=getattr(args, "verify_timeout", 60),
             max_verification_attempts=getattr(args, "max_verification_attempts", 2),
+            stop_after_verification=getattr(args, "stop_after_verification", False),
             task_mode=getattr(args, "task_mode", "auto"),
             execution_policy={"enabled": getattr(args, "execution_policy", "on") != "off"},
             secret_env_names=configured_secret_names,
@@ -310,6 +311,7 @@ def build_agent(args):
         verify_command=getattr(args, "verify_command", None),
         verify_timeout=getattr(args, "verify_timeout", 60),
         max_verification_attempts=getattr(args, "max_verification_attempts", 2),
+        stop_after_verification=getattr(args, "stop_after_verification", False),
         task_mode=getattr(args, "task_mode", "auto"),
         execution_policy={"enabled": getattr(args, "execution_policy", "on") != "off"},
         secret_env_names=configured_secret_names,
@@ -416,6 +418,7 @@ def build_arg_parser():
     parser.add_argument("--no-plan", dest="plan_mode", action="store_false", help="Disable the V1.5 execution plan context.")
     parser.set_defaults(plan_mode=True)
     parser.add_argument("--verify-command", default=None, help="Run this workspace verification command before accepting a final answer.")
+    parser.add_argument("--stop-after-verification", action="store_true", help="For bounded repair jobs, finish after an edit passes the configured development verifier.")
     parser.add_argument("--verify-timeout", type=int, default=60, help="Verification command timeout in seconds.")
     parser.add_argument("--max-verification-attempts", type=int, default=2, help="Maximum automatic repair attempts after verification failure.")
     parser.add_argument(

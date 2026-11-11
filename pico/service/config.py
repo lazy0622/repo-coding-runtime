@@ -14,6 +14,7 @@ class Repository:
     verify_command: list[str]
     agent_command: list[str] | None = None
     sandbox: str = "host"
+    agent_verify_command: list[str] | None = None
 
 
 @dataclass
@@ -34,8 +35,21 @@ class Settings:
         repositories = {}
         for key, value in raw.items():
             command = value["verify_command"]
-            if not command or not all(isinstance(arg, str) for arg in command):
+            if (
+                not isinstance(command, list)
+                or not command
+                or not all(isinstance(arg, str) for arg in command)
+            ):
                 raise ValueError("verify_command must be a nonempty argument list")
+            development = value.get("agent_verify_command")
+            if development is not None and (
+                not isinstance(development, list)
+                or not development
+                or not all(isinstance(arg, str) for arg in development)
+            ):
+                raise ValueError(
+                    "agent_verify_command must be a nonempty argument list"
+                )
             sandbox = value.get("sandbox", "host")
             if sandbox not in {"host", "docker"}:
                 raise ValueError("Invalid sandbox setting")
@@ -44,6 +58,7 @@ class Settings:
                 command,
                 value.get("agent_command"),
                 sandbox,
+                development,
             )
         token = os.environ["RUNTIME_API_TOKEN"]
         if len(token) < 24:

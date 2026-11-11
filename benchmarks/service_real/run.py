@@ -174,7 +174,13 @@ def main(label=""):
         "succeeded": sum(item["state"] == "succeeded" for item in results),
         "agent_naturally_completed": sum(
             bool(item["attempts"])
-            and item["attempts"][-1]["runtime_status"] == "completed"
+            and item["attempts"][-1]["runtime_stop_reason"] == "final_answer_returned"
+            for item in results
+        ),
+        "configured_verified_stops": sum(
+            bool(item["attempts"])
+            and item["attempts"][-1]["runtime_stop_reason"]
+            == "configured_verification_passed"
             for item in results
         ),
         "results": results,

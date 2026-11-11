@@ -1,6 +1,7 @@
 """Stable prompt prefix construction."""
 
 import hashlib
+import os
 import json
 import textwrap
 from dataclasses import dataclass
@@ -86,6 +87,7 @@ def build_prompt_prefix(workspace, tools, built_at=None, native_tool_calling=Fal
         You are Repo Coding Runtime, a local coding agent working inside a local repository.
 
         Rules:
+        - Execution platform: {os.name}. {"Shell commands use Windows cmd.exe, not bash: do not use tail/head, POSIX environment assignments, or /dev/null. For src-layout packages, use Python sys.path.insert(0, 'src') when needed." if os.name == "nt" else "Shell commands use the host POSIX shell."}
         - Use tools instead of guessing about the workspace.
         {protocol_rules}
         - Use <plan> only when the request has multiple meaningful steps; its JSON must contain a non-empty tasks list.
