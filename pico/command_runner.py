@@ -41,7 +41,7 @@ def _portable_python_argv(command: str) -> list[str] | None:
         return None
 
     text = str(command or "").strip()
-    if not text or "'" not in text:
+    if not text:
         return None
 
     # An unquoted absolute Windows executable path contains backslashes that
@@ -78,6 +78,31 @@ def _portable_python_argv(command: str) -> list[str] | None:
     return argv
 
 
+def _inline_python_in_subdirectory(command, cwd):
+    """Normalize only ``cd <workspace child> && python -c <source>``.
+
+    cmd.exe can silently truncate quoted multiline Python after a command
+    chain. Execute the Python argv directly with its requested working folder.
+    Other shell chains keep their existing boundary.
+    """
+    if os.name != "nt":
+        return None
+    try:
+        tokens = shlex.split(str(command), posix=True)
+    except ValueError:
+        return None
+    if len(tokens) < 6 or tokens[0].lower() != "cd" or tokens[2] != "&&":
+        return None
+    if any(marker in tokens[1] for marker in ("%", "$", "~")):
+        return None
+    root = Path(cwd).resolve()
+    folder = (root / tokens[1]).resolve()
+    if not folder.is_relative_to(root):
+        return None
+    argv = _portable_python_argv(shlex.join(tokens[3:]))
+    return (argv, folder) if argv is not None else None
+
+
 def run_shell_command(
     command,
     *,
@@ -93,7 +118,12 @@ def run_shell_command(
     particular subprocess implementation.
     """
 
-    argv = _portable_python_argv(str(command or ""))
+    text = str(command or "")
+    nested = _inline_python_in_subdirectory(text, cwd)
+    if nested is not None:
+        argv, cwd = nested
+    else:
+        argv = _portable_python_argv(text)
     if argv is not None:
         return runner(
             argv,
@@ -103,6 +133,11 @@ def run_shell_command(
             text=True,
             timeout=timeout,
             env=env,
+        )
+    if os.name == "nt" and ("\n" in text or "\r" in text):
+        raise ValueError(
+            "Multiline Windows shell commands require a direct python -c "
+            "invocation, optionally preceded by cd <workspace child> &&."
         )
     return runner(
         command,

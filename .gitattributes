@@ -1,2 +1,3 @@
 # Preserve accepted patch bytes and their context-line whitespace for SHA-256.
 benchmarks/service_real/patches/*.patch -text -whitespace
+benchmarks/service_real/reruns/**/patches/*.patch -text -whitespace

@@ -320,7 +320,32 @@ class Worker:
         finally:
             stop.set()
             thread.join(timeout=5)
+            self._cleanup_verification_workspace(job)
         return True
+
+    def _cleanup_verification_workspace(self, job):
+        folder = self.settings.data_dir / job["id"] / str(job["generation"])
+        # Preserve the Agent's workspace and traces for review. A resumed
+        # attempt only reconstructs a verification workspace, so that is temporary.
+        workspace = folder / (
+            "workspace" if job["checkpoint"] else "verification-workspace"
+        )
+        if not workspace.exists():
+            return
+        try:
+            workspace.resolve().relative_to(self.settings.data_dir.resolve())
+            repository = self.settings.repositories[job["payload"]["repository_id"]]
+            git(repository.path, "worktree", "remove", "--force", str(workspace))
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            (folder / "cleanup-warning.json").write_text(
+                json.dumps(
+                    {
+                        "error": type(exc).__name__,
+                        "message": redact_text(str(exc))[:500],
+                    }
+                ),
+                encoding="utf-8",
+            )
 
     def _execute(self, job, identity, lost, cancel, lease=None):
         repository = self.settings.repositories[job["payload"]["repository_id"]]
@@ -449,6 +474,7 @@ class Worker:
             lease=lease,
         )
         result = {
+            "change_kind": "patch" if patch.stat().st_size else "no_change",
             "verification_passed": code == 0,
             "verification_exit_code": code,
             "patch_sha256": checkpoint["sha256"],

@@ -1,7 +1,10 @@
 """Submit the frozen five-task set through the real authenticated service API."""
 
+import argparse
 import hashlib
 import json
+import re
+import subprocess
 import time
 import urllib.request
 from pathlib import Path
@@ -13,8 +16,18 @@ ROOT = Path(__file__).resolve().parents[2]
 FOLDER = ROOT / "artifacts/service/real-tasks-v1"
 
 
-def main():
+def main(label=""):
+    if label and not re.fullmatch(r"[a-z0-9-]{1,40}", label):
+        raise ValueError(
+            "Use 1-40 lowercase letters, digits or hyphens for the run label"
+        )
     settings = Settings.load()
+    run_folder = FOLDER if not label else FOLDER.parent / ("real-regression-" + label)
+    public_folder = (
+        Path(__file__).parent if not label else Path(__file__).parent / "reruns" / label
+    )
+    run_folder.mkdir(parents=True, exist_ok=True)
+    public_folder.mkdir(parents=True, exist_ok=True)
     store = Store(settings.database_url)
     frozen_bytes = (FOLDER / "frozen.json").read_bytes()
     frozen = json.loads(frozen_bytes)
@@ -51,10 +64,14 @@ def main():
         response = request(
             "/api/jobs",
             {"repository_id": case["id"], "task": case["task"]},
-            "real-v1-" + digest[:16] + "-" + case["id"],
+            "real-v1-"
+            + (label + "-" if label else "")
+            + digest[:16]
+            + "-"
+            + case["id"],
         )
         submitted[case["id"]] = response["job"]["id"]
-    (FOLDER / "submitted.json").write_text(json.dumps(submitted, indent=2))
+    (run_folder / "submitted.json").write_text(json.dumps(submitted, indent=2))
     print("Submitted frozen five-case set through /api/jobs", flush=True)
     deadline = time.monotonic() + 900
     pending = dict(submitted)
@@ -68,7 +85,7 @@ def main():
             time.sleep(2)
 
     results = []
-    patch_folder = Path(__file__).with_name("patches")
+    patch_folder = public_folder / "patches"
     patch_folder.mkdir(exist_ok=True)
     for case in frozen["cases"]:
         job_id = submitted[case["id"]]
@@ -79,7 +96,10 @@ def main():
             folder = settings.data_dir / job_id / str(attempt["generation"])
             counts = {"input_tokens": 0, "output_tokens": 0}
             calls = 0
-            for trace in folder.glob("workspace/.pico/runs/*/trace.jsonl"):
+            traces = list(folder.glob("workspace/.pico/runs/*/trace.jsonl")) or list(
+                folder.glob("runtime-runs/*/trace.jsonl")
+            )
+            for trace in traces:
                 for line in trace.read_text(encoding="utf-8").splitlines():
                     event = json.loads(line)
                     if event.get("event") == "model_parsed":
@@ -87,7 +107,9 @@ def main():
                         for name in counts:
                             counts[name] += metadata.get(name, 0) or 0
                         calls += 1
-            runtime_reports = list(folder.glob("workspace/.pico/runs/*/report.json"))
+            runtime_reports = list(
+                folder.glob("workspace/.pico/runs/*/report.json")
+            ) or list(folder.glob("runtime-runs/*/report.json"))
             runtime = (
                 json.loads(runtime_reports[-1].read_text(encoding="utf-8"))
                 if runtime_reports
@@ -133,7 +155,13 @@ def main():
             }
         )
     report = {
-        "tier": frozen["tier"],
+        "tier": "known_task_regression_not_new_heldout" if label else frozen["tier"],
+        "run_label": label or "baseline",
+        "service_commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT
+        )
+        .decode()
+        .strip(),
         "frozen_manifest_sha256": digest,
         "model": "deepseek-flash",
         "thinking": False,
@@ -152,7 +180,7 @@ def main():
         "results": results,
     }
     serialized = json.dumps(report, ensure_ascii=False, indent=2, default=str)
-    for target in (FOLDER / "results.json", Path(__file__).with_name("RESULTS.json")):
+    for target in (run_folder / "results.json", public_folder / "RESULTS.json"):
         target.write_text(serialized, encoding="utf-8")
     print(
         json.dumps({"total": report["total"], "succeeded": report["succeeded"]}),
@@ -163,4 +191,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run-label", default="")
+    main(parser.parse_args().run_label)

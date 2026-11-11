@@ -207,13 +207,7 @@ def test_worker_loop_retries_then_claims_after_database_recovers(monkeypatch):
 # --- Confirmed but intentionally not fixed in this review branch ----------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Open issue: an empty patch is published as 'succeeded' when the "
-    "verifier already passes on base; needs a product decision (reject or "
-    "label as no_change), not a silent rule.",
-)
-def test_noop_agent_is_not_reported_as_success(store, configured, tmp_path):
+def test_noop_agent_is_explicitly_reported_as_no_change(store, configured, tmp_path):
     settings, job, _ = configured
     noop = tmp_path / "noop.py"
     noop.write_text("pass\n", encoding="utf-8")
@@ -221,15 +215,14 @@ def test_noop_agent_is_not_reported_as_success(store, configured, tmp_path):
     settings.repositories["demo"].verify_command = [sys.executable, "-c", "pass"]
     Worker(settings, store).run_one()
     final = store.get(job["id"])
-    assert final["state"] != "succeeded"
+    assert final["state"] == "succeeded"
+    assert final["result"]["verification_passed"] is True
+    assert final["result"]["change_kind"] == "no_change"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Open issue: each attempt registers 1-2 worktrees in the trusted "
-    "source repository and never removes them (disk and .git/worktrees growth).",
-)
-def test_attempt_does_not_leak_worktrees_into_source_repo(store, configured):
+def test_temporary_verification_worktree_is_removed_and_agent_evidence_retained(
+    store, configured
+):
     settings, job, _ = configured
     Worker(settings, store).run_one()
     assert store.get(job["id"])["state"] == "succeeded"
@@ -240,7 +233,9 @@ def test_attempt_does_not_leak_worktrees_into_source_repo(store, configured):
         text=True,
         check=True,
     ).stdout
-    assert listing.count("worktree ") == 1, listing
+    assert listing.count("worktree ") == 2, listing  # source + retained Agent evidence
+    assert "verification-workspace" not in listing
+    assert (settings.data_dir / job["id"] / "1/workspace/.pico").is_dir()
 
 
 # --- 3. Process lifetime on Windows ----------------------------------------
