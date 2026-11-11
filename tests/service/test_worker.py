@@ -162,3 +162,24 @@ def test_child_environment_excludes_control_plane_credentials(monkeypatch):
     assert "RUNTIME_API_TOKEN" not in child_environment(provider=True)
     assert child_environment(provider=True)["PICO_DEEPSEEK_API_KEY"] == "model-key"
     assert "PICO_DEEPSEEK_API_KEY" not in child_environment()
+
+
+@pytest.mark.parametrize("task", ["--help", "--provider quoted 'value'\n中文 ; $(literal) {workspace} {task}"])
+def test_registered_agent_receives_task_as_one_literal_argument(store, configured, task):
+    from pathlib import Path
+
+    settings, original_job, _ = configured
+    repository = settings.repositories["demo"]
+    agent_path = Path(repository.agent_command[1])
+    with agent_path.open("a", encoding="utf-8") as handle:
+        handle.write('root.joinpath("received-task.txt").write_text(sys.argv[2], encoding="utf-8")\n')
+    repository.agent_command.append("{task}")
+    store.cancel(original_job["id"])
+    job = store.submit(
+        "literal-task", original_job["payload"] | {"task": task},
+        base_commit=original_job["payload"]["base_commit"],
+    )[0]
+    assert Worker(settings, store).run_one()
+    assert store.get(job["id"])["state"] == "succeeded"
+    workspace = Path(store.list_attempts(job["id"])[0]["workspace"])
+    assert (workspace / "received-task.txt").read_text(encoding="utf-8") == task

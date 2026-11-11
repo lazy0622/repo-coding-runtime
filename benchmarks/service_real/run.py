@@ -16,7 +16,9 @@ ROOT = Path(__file__).resolve().parents[2]
 FOLDER = ROOT / "artifacts/service/real-tasks-v1"
 
 
-def main(label=""):
+def main(label="", engine="pico"):
+    if engine not in {"pico", "pi"} or (engine == "pi" and not label):
+        raise ValueError("Pi comparison requires an explicit new run label")
     if label and not re.fullmatch(r"[a-z0-9-]{1,40}", label):
         raise ValueError(
             "Use 1-40 lowercase letters, digits or hyphens for the run label"
@@ -63,8 +65,12 @@ def main(label=""):
     for case in frozen["cases"]:
         response = request(
             "/api/jobs",
-            {"repository_id": case["id"], "task": case["task"]},
+            {
+                "repository_id": case["id"] + ("--pi" if engine == "pi" else ""),
+                "task": case["task"],
+            },
             "real-v1-"
+            + ("pi-" if engine == "pi" else "")
             + (label + "-" if label else "")
             + digest[:16]
             + "-"
@@ -162,10 +168,18 @@ def main(label=""):
         )
         .decode()
         .strip(),
+        "engine": engine,
+        "engine_version": "1.5.1" if engine == "pi" else None,
         "frozen_manifest_sha256": digest,
         "model": "deepseek-flash",
         "thinking": False,
-        "max_model_steps_per_attempt": 12,
+        "max_model_steps_per_attempt": 12 if engine == "pico" else None,
+        "max_model_calls_per_attempt": 13 if engine == "pi" else None,
+        "budget_note": (
+            "Pi: 13 assistant-message call cap, 230s adapter deadline; "
+            "Pico: 12 tool-step cap. These are not identical step semantics. "
+            "Both share service task and independent-verification deadlines."
+        ),
         "task_timeout_seconds": settings.task_timeout,
         "verification_timeout_seconds": settings.verify_timeout,
         "cost_currency_amount": None,
@@ -199,4 +213,6 @@ def main(label=""):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-label", default="")
-    main(parser.parse_args().run_label)
+    parser.add_argument("--engine", choices=("pico", "pi"), default="pico")
+    args = parser.parse_args()
+    main(args.run_label, args.engine)

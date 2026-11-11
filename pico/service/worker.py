@@ -368,7 +368,9 @@ class Worker:
         else:
             if repository.agent_command:
                 command = [
-                    arg.replace("{workspace}", str(workspace))
+                    job["payload"]["task"]
+                    if arg == "{task}"
+                    else arg.replace("{workspace}", str(workspace))
                     for arg in repository.agent_command
                 ]
             else:

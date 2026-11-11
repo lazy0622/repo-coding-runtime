@@ -1,0 +1,85 @@
+import json
+import queue
+import time
+from types import SimpleNamespace
+
+import pytest
+
+from benchmarks.pi_compare import pi_agent
+
+
+@pytest.mark.parametrize(
+    "tail, expected",
+    [
+        ([{"type": "agent_settled", "aborted": False}], "completed"),
+        ([{"type": "agent_end"}], "failed"),
+        ([{"type": "agent_settled", "aborted": True}], "failed"),
+        ([TimeoutError("deadline")], "failed"),
+    ],
+)
+def test_acceptance_response_or_low_level_end_is_not_completion(
+    tmp_path, monkeypatch, tail, expected
+):
+    events = iter(
+        [
+            {"type": "response", "id": "task", "success": True},
+            {
+                "type": "message_end",
+                "message": {"role": "assistant", "stopReason": "stop"},
+            },
+            *tail,
+        ]
+    )
+
+    class FakeRPC:
+        def request(self, *args, **kwargs):
+            return {}
+
+        def send(self, command):
+            assert command["message"] == "--help"
+
+        def receive(self, deadline):
+            event = next(events, EOFError("closed"))
+            if isinstance(event, Exception):
+                raise event
+            return event
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(pi_agent, "launch", lambda *args, **kwargs: FakeRPC())
+    args = SimpleNamespace(
+        workspace=tmp_path, node=None, cli=None, shell=None, task="--help", timeout=1
+    )
+    assert pi_agent.run(args) == (0 if expected == "completed" else 1)
+    report = json.loads(next(tmp_path.glob(".pico/runs/*/report.json")).read_text())
+    assert report["status"] == expected
+
+
+def test_extension_failure_is_not_swallowed_while_waiting_for_response():
+    rpc = object.__new__(pi_agent.PiRPC)
+    rpc.records = queue.Queue()
+    rpc.responses = {}
+    rpc.records.put({"type": "extension_error", "error": "spawn filter unavailable"})
+    rpc.records.put({"type": "response", "id": "setup", "success": True})
+    with pytest.raises(RuntimeError, match="extension failed"):
+        rpc.wait_response("setup", timeout=1)
+
+
+def test_interleaved_command_responses_are_correlated_by_id():
+    rpc = object.__new__(pi_agent.PiRPC)
+    rpc.records = queue.Queue()
+    rpc.responses = {}
+    rpc.records.put(
+        {"type": "response", "id": "bash", "success": True, "data": {"cancelled": True}}
+    )
+    rpc.records.put({"type": "response", "id": "abort", "success": True})
+    assert rpc.wait_response("abort", timeout=1) == {}
+    assert rpc.wait_response("bash", timeout=0.1) == {"cancelled": True}
+
+
+def test_rpc_receive_deadline_cannot_block_indefinitely():
+    rpc = object.__new__(pi_agent.PiRPC)
+    rpc.records = queue.Queue()
+    with pytest.raises(TimeoutError):
+        rpc.receive(time.monotonic() - 1)
