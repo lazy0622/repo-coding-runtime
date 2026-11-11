@@ -1,0 +1,199 @@
+{
+  "tier": "known_task_regression_not_new_heldout",
+  "run_label": "nov11-verified-stop",
+  "service_commit": "70a873a21828d006fab091e69aece5cfa41536f0",
+  "frozen_manifest_sha256": "5b33e316a8379fd0708b0a0891e572dbb01ff1b532dcc4c9bafc4af12ee7c575",
+  "model": "deepseek-flash",
+  "thinking": false,
+  "max_model_steps_per_attempt": 12,
+  "task_timeout_seconds": 240.0,
+  "verification_timeout_seconds": 60.0,
+  "cost_currency_amount": null,
+  "cost_note": "Provider token usage recorded; monetary cost not returned by provider.",
+  "total": 5,
+  "succeeded": 5,
+  "agent_naturally_completed": 0,
+  "configured_verified_stops": 0,
+  "results": [
+    {
+      "case_id": "humanize-intcomma-large-int",
+      "source_url": "https://github.com/python-humanize/humanize/pull/392",
+      "upstream_base_commit": "14965a74953eb5119859975e7c452a04b481cdae",
+      "fix_reference_commit": "984526c02448110a8392dde3f5e26096dfd7c729",
+      "base_snapshot_commit": "92d95cea79d59d5e54996ab522d4a058fc7816e1",
+      "preflight_exit_codes": {
+        "base": 1,
+        "reference": 0
+      },
+      "base_upstream_regression_exit_code": 0,
+      "state": "succeeded",
+      "result": {
+        "change_kind": "patch",
+        "verification_passed": true,
+        "verification_exit_code": 0,
+        "patch_sha256": "6562e2362402bd21185a4f31a54da14e9aa4b6a17a7c45771773821cc89db28e",
+        "recovery": "new_execution",
+        "verification_output": "Independent behavior checks passed\r\n........................................................................ [ 31%]\r\n........................................................................ [ 62%]\r\n........................................................................ [ 93%]\r\n................                                                         [100%]\r\n232 passed in 0.28s\r\n"
+      },
+      "attempts": [
+        {
+          "generation": 1,
+          "state": "succeeded",
+          "elapsed_seconds": 33.06,
+          "model_calls": 13,
+          "observed_usage": {
+            "input_tokens": 48946,
+            "output_tokens": 1016
+          },
+          "runtime_status": "stopped",
+          "runtime_stop_reason": "step_limit_reached",
+          "tool_steps": 12
+        }
+      ]
+    },
+    {
+      "case_id": "humanize-fractional-whole",
+      "source_url": "https://github.com/python-humanize/humanize/pull/354",
+      "upstream_base_commit": "e1a5c7c9efe9f82edc89a2df8c2b599516a87dcb",
+      "fix_reference_commit": "08cf2c3026cfd7c553e397e1d91ea069eb2a4978",
+      "base_snapshot_commit": "16bedcb887d22d9a311b52050d151f6de2cdf49b",
+      "preflight_exit_codes": {
+        "base": 1,
+        "reference": 0
+      },
+      "base_upstream_regression_exit_code": 0,
+      "state": "succeeded",
+      "result": {
+        "change_kind": "patch",
+        "verification_passed": true,
+        "verification_exit_code": 0,
+        "patch_sha256": "95a4641cd0b077eae2dcba1657496bd7e6bbc61b349b9a719c1ff61d70fb2b94",
+        "recovery": "new_execution",
+        "verification_output": "Independent behavior checks passed\r\n........................................................................ [ 31%]\r\n........................................................................ [ 63%]\r\n........................................................................ [ 95%]\r\n...........                                                              [100%]\r\n227 passed in 0.27s\r\n"
+      },
+      "attempts": [
+        {
+          "generation": 1,
+          "state": "succeeded",
+          "elapsed_seconds": 33.39,
+          "model_calls": 13,
+          "observed_usage": {
+            "input_tokens": 42028,
+            "output_tokens": 1307
+          },
+          "runtime_status": "stopped",
+          "runtime_stop_reason": "step_limit_reached",
+          "tool_steps": 12
+        }
+      ]
+    },
+    {
+      "case_id": "humanize-naturalsize-rollover",
+      "source_url": "https://github.com/python-humanize/humanize/pull/329",
+      "upstream_base_commit": "7574e0cc377d80db0d2756fc2c5e0b8799a6f8b4",
+      "fix_reference_commit": "823ad6096e1e5ba82ea876ce761fc2efebd76157",
+      "base_snapshot_commit": "a80a3cfa2d8142661e068a1a9ff8b4344193a594",
+      "preflight_exit_codes": {
+        "base": 1,
+        "reference": 0
+      },
+      "base_upstream_regression_exit_code": 0,
+      "state": "succeeded",
+      "result": {
+        "change_kind": "patch",
+        "verification_passed": true,
+        "verification_exit_code": 0,
+        "patch_sha256": "f6c840a21d38ee91c50ca72b029d8cb8930fa02e45823463c4767ee839cf5fbd",
+        "recovery": "new_execution",
+        "verification_output": "Independent behavior checks passed\r\n......................................................................   [100%]\r\n70 passed in 0.13s\r\n"
+      },
+      "attempts": [
+        {
+          "generation": 1,
+          "state": "succeeded",
+          "elapsed_seconds": 79.42,
+          "model_calls": 14,
+          "observed_usage": {
+            "input_tokens": 46613,
+            "output_tokens": 1380
+          },
+          "runtime_status": "stopped",
+          "runtime_stop_reason": "step_limit_reached",
+          "tool_steps": 12
+        }
+      ]
+    },
+    {
+      "case_id": "itsdangerous-future-timestamp",
+      "source_url": "https://github.com/pallets/itsdangerous/commit/c30678d19e37011890e2374cca04f7789e101793",
+      "upstream_base_commit": "1a9b8d1f9968eb248bda69f39d373a6330b692ba",
+      "fix_reference_commit": "c30678d19e37011890e2374cca04f7789e101793",
+      "base_snapshot_commit": "d37281ae543d51a913ef9e05add72d03532d3a5d",
+      "preflight_exit_codes": {
+        "base": 1,
+        "reference": 0
+      },
+      "base_upstream_regression_exit_code": 0,
+      "state": "succeeded",
+      "result": {
+        "change_kind": "patch",
+        "verification_passed": true,
+        "verification_exit_code": 0,
+        "patch_sha256": "2d5d63141a5439ffdfbca51c838ff6c0b21af2b55f19a115301e402cc087e63b",
+        "recovery": "new_execution",
+        "verification_output": "Independent behavior checks passed\r\n........................................................................ [ 64%]\r\n........................................                                 [100%]\r\n112 passed in 0.46s\r\n"
+      },
+      "attempts": [
+        {
+          "generation": 1,
+          "state": "succeeded",
+          "elapsed_seconds": 49.48,
+          "model_calls": 13,
+          "observed_usage": {
+            "input_tokens": 38449,
+            "output_tokens": 1219
+          },
+          "runtime_status": "stopped",
+          "runtime_stop_reason": "step_limit_reached",
+          "tool_steps": 12
+        }
+      ]
+    },
+    {
+      "case_id": "itsdangerous-none-salt",
+      "source_url": "https://github.com/pallets/itsdangerous/commit/41ec419632aae3533ff12838044eeddd9cd1311f",
+      "upstream_base_commit": "15a2e0d9b4bdaa38144c947a9aa04ffd49826700",
+      "fix_reference_commit": "41ec419632aae3533ff12838044eeddd9cd1311f",
+      "base_snapshot_commit": "8be121df4f636e6d0af6520681adafde6901a7b7",
+      "preflight_exit_codes": {
+        "base": 1,
+        "reference": 0
+      },
+      "base_upstream_regression_exit_code": 0,
+      "state": "succeeded",
+      "result": {
+        "change_kind": "patch",
+        "verification_passed": true,
+        "verification_exit_code": 0,
+        "patch_sha256": "349cb69f25d631cb6f215e5cac2ffda5aa28bf748feb10d8931a3ede5e2651e2",
+        "recovery": "new_execution",
+        "verification_output": "Independent behavior checks passed\r\n.................                                                        [100%]\r\n17 passed in 0.08s\r\n"
+      },
+      "attempts": [
+        {
+          "generation": 1,
+          "state": "succeeded",
+          "elapsed_seconds": 27.44,
+          "model_calls": 13,
+          "observed_usage": {
+            "input_tokens": 42235,
+            "output_tokens": 1081
+          },
+          "runtime_status": "stopped",
+          "runtime_stop_reason": "step_limit_reached",
+          "tool_steps": 12
+        }
+      ]
+    }
+  ]
+}

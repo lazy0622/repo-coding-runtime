@@ -1,0 +1,13 @@
+diff --git a/src/itsdangerous/signer.py b/src/itsdangerous/signer.py
+index 7e2be7d..ce15aa7 100644
+--- a/src/itsdangerous/signer.py
++++ b/src/itsdangerous/signer.py
+@@ -120,7 +120,7 @@ class Signer:
+     def __init__(
+         self,
+         secret_key: _t_secret_key,
+-        salt: _t_str_bytes = b"itsdangerous.Signer",
++        salt: _t_opt_str_bytes = b"itsdangerous.Signer",
+         sep: _t_str_bytes = b".",
+         key_derivation: _t.Optional[str] = None,
+         digest_method: _t.Optional[_t.Any] = None,

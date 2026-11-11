@@ -1,0 +1,113 @@
+diff --git a/err.txt b/err.txt
+new file mode 100644
+index 0000000..f7beb77
+--- /dev/null
++++ b/err.txt
+@@ -0,0 +1,84 @@
++Traceback (most recent call last):
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\anyio\_core\_eventloop.py", line 208, in get_async_backend
++    return loaded_backends[asynclib_name]
++           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
++KeyError: 'asyncio'
++
++During handling of the above exception, another exception occurred:
++
++Traceback (most recent call last):
++  File "<frozen runpy>", line 198, in _run_module_as_main
++  File "<frozen runpy>", line 88, in _run_code
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\pytest\__main__.py", line 9, in <module>
++    raise SystemExit(pytest.console_main())
++                     ^^^^^^^^^^^^^^^^^^^^^
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\_pytest\config\__init__.py", line 201, in console_main
++    code = main()
++           ^^^^^^
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\_pytest\config\__init__.py", line 156, in main
++    config = _prepareconfig(args, plugins)
++             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\_pytest\config\__init__.py", line 341, in _prepareconfig
++    config = pluginmanager.hook.pytest_cmdline_parse(
++             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\pluggy\_caller.py", line 197, in __call__
++    return self._hookexec(
++           ^^^^^^^^^^^^^^^
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\pluggy\_manager.py", line 183, in _hookexec
++    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
++           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\pluggy\_execution.py", line 195, in _multicall
++    raise exception
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\pluggy\_execution.py", line 167, in _multicall
++    teardown.throw(exception)
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\_pytest\helpconfig.py", line 105, in pytest_cmdline_parse
++    config = yield
++             ^^^^^
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\pluggy\_execution.py", line 147, in _multicall
++    res = hook_impl.function(*args)
++          ^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\_pytest\config\__init__.py", line 1140, in pytest_cmdline_parse
++    self.parse(args)
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\_pytest\config\__init__.py", line 1494, in parse
++    self._preparse(args, addopts=addopts)
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\_pytest\config\__init__.py", line 1381, in _preparse
++    self.pluginmanager.load_setuptools_entrypoints("pytest11")
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\pluggy\_manager.py", line 521, in load_setuptools_entrypoints
++    plugin = ep.load()
++             ^^^^^^^^^
++  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\importlib\metadata\__init__.py", line 202, in load
++    module = import_module(match.group('module'))
++             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\importlib\__init__.py", line 126, in import_module
++    return _bootstrap._gcd_import(name[level:], package, level)
++           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "<frozen importlib._bootstrap>", line 1204, in _gcd_import
++  File "<frozen importlib._bootstrap>", line 1176, in _find_and_load
++  File "<frozen importlib._bootstrap>", line 1147, in _find_and_load_unlocked
++  File "<frozen importlib._bootstrap>", line 690, in _load_unlocked
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\_pytest\assertion\rewrite.py", line 185, in exec_module
++    exec(co, module.__dict__)
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\anyio\pytest_plugin.py", line 309, in <module>
++    @pytest.fixture(scope="module", params=get_available_backends())
++                                           ^^^^^^^^^^^^^^^^^^^^^^^^
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\anyio\_core\_eventloop.py", line 157, in get_available_backends
++    get_async_backend(backend_name)
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\anyio\_core\_eventloop.py", line 210, in get_async_backend
++    module = import_module(f"anyio._backends._{asynclib_name}")
++             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\importlib\__init__.py", line 126, in import_module
++    return _bootstrap._gcd_import(name[level:], package, level)
++           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++  File "<frozen importlib._bootstrap>", line 1204, in _gcd_import
++  File "<frozen importlib._bootstrap>", line 1176, in _find_and_load
++  File "<frozen importlib._bootstrap>", line 1147, in _find_and_load_unlocked
++  File "<frozen importlib._bootstrap>", line 690, in _load_unlocked
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\_pytest\assertion\rewrite.py", line 185, in exec_module
++    exec(co, module.__dict__)
++  File "C:\Users\Administrator\Desktop\agent\.venvs\runtime-service\Lib\site-packages\anyio\_backends\_asyncio.py", line 4, in <module>
++    import asyncio
++  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\asyncio\__init__.py", line 42, in <module>
++    from .windows_events import *
++  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 8, in <module>
++    import _overlapped
++OSError: [WinError 10106] 无法加载或初始化请求的服务提供程序。
+diff --git a/out.txt b/out.txt
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/humanize/number.py b/src/humanize/number.py
+index 78bb26f..c63d967 100644
+--- a/src/humanize/number.py
++++ b/src/humanize/number.py
+@@ -361,10 +361,11 @@ def fractional(value: NumberOrString) -> str:
+     frac = Fraction(number - whole_number).limit_denominator(1000)
+     numerator = frac.numerator
+     denominator = frac.denominator
+-    if whole_number and not numerator and denominator == 1:
+-        # this means that an integer was passed in
+-        # (or variants of that integer like 1.0000)
+-        return f"{whole_number:.0f}"
++    if denominator == 1:
++        # The value is (or rounds to) a whole number: an integer was passed in
++        # (or variants of that integer like 1.0000), or the fractional part
++        # rounded up to a whole at the denominator limit (e.g. 2.9999999).
++        return f"{whole_number + numerator:.0f}"
+ 
+     if not whole_number:
+         return f"{numerator:.0f}/{denominator:.0f}"

@@ -1,0 +1,18 @@
+diff --git a/src/humanize/number.py b/src/humanize/number.py
+index 78bb26f..52876a6 100644
+--- a/src/humanize/number.py
++++ b/src/humanize/number.py
+@@ -361,9 +361,11 @@ def fractional(value: NumberOrString) -> str:
+     frac = Fraction(number - whole_number).limit_denominator(1000)
+     numerator = frac.numerator
+     denominator = frac.denominator
+-    if whole_number and not numerator and denominator == 1:
++    if not numerator and denominator == 1:
+         # this means that an integer was passed in
+-        # (or variants of that integer like 1.0000)
++        # (or variants of that integer like 1.0000), or that the
++        # fractional part rounded to a whole at the denominator limit
++        # (e.g. 2.9999999 -> 3)
+         return f"{whole_number:.0f}"
+ 
+     if not whole_number:

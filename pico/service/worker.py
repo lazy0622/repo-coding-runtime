@@ -409,7 +409,6 @@ class Worker:
                     )
                     command[-2:-2] = [
                         "--no-plan",
-                        "--stop-after-verification",
                         "--verify-command",
                         verify_command,
                         "--verify-timeout",

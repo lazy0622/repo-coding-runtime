@@ -133,6 +133,27 @@ def test_verifier_failure_is_not_success(store, configured):
     assert result["result"]["verification_exit_code"] == 7
 
 
+def test_development_checks_do_not_force_early_completion(store, configured):
+    settings, job, _ = configured
+    repository = settings.repositories["demo"]
+    fixture_agent = repository.agent_command
+    repository.agent_command = None
+    repository.agent_verify_command = [sys.executable, "-c", "pass"]
+    worker = Worker(settings, store)
+    original = worker._run
+
+    def execute(command, cwd, output, *args, **kwargs):
+        if output.name == "agent.log":
+            assert "--verify-command" in command
+            assert "--stop-after-verification" not in command
+            command = [arg.replace("{workspace}", str(cwd)) for arg in fixture_agent]
+        return original(command, cwd, output, *args, **kwargs)
+
+    worker._run = execute
+    assert worker.run_one()
+    assert store.get(job["id"])["state"] == "succeeded"
+
+
 def test_child_environment_excludes_control_plane_credentials(monkeypatch):
     monkeypatch.setenv("RUNTIME_DATABASE_URL", "do-not-pass")
     monkeypatch.setenv("RUNTIME_API_TOKEN", "do-not-pass")

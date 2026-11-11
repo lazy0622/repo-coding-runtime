@@ -1,0 +1,13 @@
+diff --git a/src/itsdangerous/timed.py b/src/itsdangerous/timed.py
+index 2ae0261..cf20265 100644
+--- a/src/itsdangerous/timed.py
++++ b/src/itsdangerous/timed.py
+@@ -97,7 +97,7 @@ class TimestampSigner(Signer):
+         if max_age is not None:
+             age = self.get_timestamp() - timestamp
+ 
+-            if age > max_age:
++            if age < 0 or age > max_age:
+                 raise SignatureExpired(
+                     f"Signature age {age} > {max_age} seconds",
+                     payload=value,
