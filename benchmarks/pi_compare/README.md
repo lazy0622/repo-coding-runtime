@@ -12,6 +12,14 @@ remain in the existing Python service. No Robomp/Orbi queue was imported.
 | Pico current-head rerun | 4/5 | 5/5 | 0/5 | 35,788 / 2,880 |
 | Pi service integration | 2/5 | 3/5 | 2/5 | 270,816 / 6,628 |
 
+Subsequent [budget-stop diagnosis](POSTHOC_BUDGET_DIAGNOSIS.md) found that
+naturalsize's retained source passes the independent behavior checks and all
+70 frozen original regressions when applied alone in a fresh worktree. The
+budget-stop handling differs between executors, and the fixed-test policy also
+rejects candidate-added tests. Thus 2/5 is service acceptance, not a clean
+measurement of how many source fixes are behaviorally valid. Original results
+remain unchanged; see the supplementary report before interpreting this table.
+
 Pico ran at `0ecb78e`; Pi integration ran at `1e4a562`. Every task was submitted
 once to its selected executor; the first two Pi integration jobs were adopted
 by the five-case collector through the same idempotency keys, not rerun.

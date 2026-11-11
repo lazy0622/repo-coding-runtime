@@ -1,0 +1,10 @@
+{
+  "tier": "posthoc_source_only_diagnostic_not_original_service_acceptance",
+  "case_id": "humanize-naturalsize-rollover",
+  "candidate_source_patch_sha256": "1aa390b128343d6eb69cc819b745449280b3e754b82b7d7d8dcd5216936eefb3",
+  "candidate_test_additions_omitted": true,
+  "reason": "Evaluate candidate source against frozen base tests; original service outcome unchanged",
+  "exit_code": 0,
+  "stdout": "Independent behavior checks passed\n......................................................................   [100%]\n70 passed in 0.11s\n",
+  "stderr": ""
+}

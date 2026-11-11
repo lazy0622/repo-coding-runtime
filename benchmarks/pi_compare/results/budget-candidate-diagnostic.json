@@ -1,0 +1,16 @@
+[
+  {
+    "case_id": "humanize-intcomma-large-int",
+    "tier": "posthoc_retained_workspace_diagnostic_not_sealed_service_acceptance",
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "Traceback (most recent call last):\n  File \"C:\\Users\\Administrator\\Desktop\\agent\\repo-runtime-service\\benchmarks\\service_real\\verify.py\", line 107, in <module>\n    main()\n  File \"C:\\Users\\Administrator\\Desktop\\agent\\repo-runtime-service\\benchmarks\\service_real\\verify.py\", line 92, in main\n    behavior(case_id)\n  File \"C:\\Users\\Administrator\\Desktop\\agent\\repo-runtime-service\\benchmarks\\service_real\\verify.py\", line 17, in behavior\n    assert humanize.intcomma(number) == format(number, \",\")\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Administrator\\Desktop\\agent\\repo-runtime-service\\artifacts\\service\\data\\89b0226ebcaa47ffa7f608c94638593a\\1\\workspace\\src\\humanize\\number.py\", line 167, in intcomma\n    float(value)\nOverflowError: int too large to convert to float\n"
+  },
+  {
+    "case_id": "humanize-naturalsize-rollover",
+    "tier": "posthoc_retained_workspace_diagnostic_not_sealed_service_acceptance",
+    "exit_code": 1,
+    "stdout": "Independent behavior checks passed\n",
+    "stderr": "Traceback (most recent call last):\n  File \"C:\\Users\\Administrator\\Desktop\\agent\\repo-runtime-service\\benchmarks\\service_real\\verify.py\", line 107, in <module>\n    main()\n  File \"C:\\Users\\Administrator\\Desktop\\agent\\repo-runtime-service\\benchmarks\\service_real\\verify.py\", line 98, in main\n    assert (workspace / name).read_bytes().replace(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Upstream regression file was changed\n"
+  }
+]
